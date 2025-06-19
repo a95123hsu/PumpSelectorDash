@@ -1,1 +1,1 @@
-web: gunicorn pumpSelector:app
+web: gunicorn pumpSelector:server

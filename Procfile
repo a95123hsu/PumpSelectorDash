@@ -1,1 +1,1 @@
-web: gunicorn pumpSelector:PumpSelectorDash
+web: gunicorn pumpSelector:app

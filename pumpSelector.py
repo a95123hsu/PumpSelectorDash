@@ -678,7 +678,6 @@ app.index_string = '''
                 border-color: var(--primary-color) !important;
                 box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1) !important;
             }
-            
             .modern-button-primary {
                 background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%) !important;
                 color: white !important;
@@ -948,24 +947,15 @@ app.index_string = '''
 </html>
 '''
 
-# Load initial data
-pumps_df = load_pump_data()
-curve_df = load_pump_curve_data()
-
-# Print debug info
-print(f"Loaded {len(pumps_df)} pump records")
-print(f"Loaded {len(curve_df)} curve records")
-if not pumps_df.empty:
-    print(f"Pump columns: {list(pumps_df.columns)}")
-if not curve_df.empty:
-    print(f"Curve columns: {list(curve_df.columns)}")
-
-# --- Modern App Layout ---
+# --- Modern App Layout with Proper Data Loading ---
 app.layout = html.Div([
+    # Data loading trigger
+    dcc.Interval(id="load-trigger", interval=500, max_intervals=1),
+    
     # Store components for state management
     dcc.Store(id='language-store', data='English'),
-    dcc.Store(id='pumps-data-store', data=pumps_df.to_dict('records') if not pumps_df.empty else []),
-    dcc.Store(id='curve-data-store', data=curve_df.to_dict('records') if not curve_df.empty else []),
+    dcc.Store(id='pumps-data-store', data=[]),
+    dcc.Store(id='curve-data-store', data=[]),
     dcc.Store(id='filtered-pumps-store', data=[]),
     dcc.Store(id='selected-pumps-store', data=[]),
     dcc.Store(id='user-operating-point-store', data={'flow': 0, 'head': 0}),
@@ -1003,34 +993,109 @@ app.layout = html.Div([
             })
         ]),
         
-        # Status Bar
-        html.Div(className='status-bar', children=[
-            html.Div([
-                html.Div(className='status-indicator', children=[
-                    html.I(className="fas fa-database"),
-                    html.Span(id='data-info', children="Loading data...")
-                ]),
-                html.Div(className='status-indicator', children=[
-                    html.I(className="fas fa-chart-line"),
-                    html.Span(id='curve-info', children="")
-                ], style={'marginLeft': '24px'}),
-            ], style={'display': 'flex', 'alignItems': 'center'}),
-            
-            html.Div([
-                html.Button(
-                    id='refresh-button',
-                    className='modern-button-secondary',
-                    children=[html.I(className="fas fa-sync-alt", style={'marginRight': '8px'}), "Refresh Data"]
-                ),
-                html.Button(
-                    id='reset-button',
-                    className='modern-button-secondary',
-                    children=[html.I(className="fas fa-undo", style={'marginRight': '8px'}), "Reset"],
-                    style={'marginLeft': '12px'}
-                ),
-            ], style={'display': 'flex', 'alignItems': 'center'}),
-        ]),
+        # Status Bar with Loading
+        dcc.Loading(
+            id="loading-status",
+            type="circle",
+            children=html.Div(className='status-bar', children=[
+                html.Div([
+                    html.Div(id='data-status-output'),
+                ], style={'display': 'flex', 'alignItems': 'center'}),
+                
+                html.Div([
+                    html.Button(
+                        id='refresh-button',
+                        className='modern-button-secondary',
+                        children=[html.I(className="fas fa-sync-alt", style={'marginRight': '8px'}), "Refresh Data"]
+                    ),
+                    html.Button(
+                        id='reset-button',
+                        className='modern-button-secondary',
+                        children=[html.I(className="fas fa-undo", style={'marginRight': '8px'}), "Reset"],
+                        style={'marginLeft': '12px'}
+                    ),
+                ], style={'display': 'flex', 'alignItems': 'center'}),
+            ])
+        ),
         
+        # Main Content Area - Only shown when data is loaded
+        html.Div(id='main-content-output'),
+    ]),
+])
+
+# --- Data Loading Callbacks ---
+
+@app.callback(
+    [Output('pumps-data-store', 'data'),
+     Output('curve-data-store', 'data')],
+    [Input('load-trigger', 'n_intervals'),
+     Input('refresh-button', 'n_clicks')]
+)
+def fetch_data(n_intervals, refresh_clicks):
+    """Load data from Supabase into stores"""
+    print("🔄 Fetching data for app...")
+    
+    pumps_df = load_pump_data()
+    curve_df = load_pump_curve_data()
+    
+    pumps_data = pumps_df.to_dict('records') if not pumps_df.empty else []
+    curve_data = curve_df.to_dict('records') if not curve_df.empty else []
+    
+    print(f"📊 Stored {len(pumps_data)} pump records in store")
+    print(f"📈 Stored {len(curve_data)} curve records in store")
+    
+    return pumps_data, curve_data
+
+@app.callback(
+    Output('data-status-output', 'children'),
+    [Input('pumps-data-store', 'data'),
+     Input('curve-data-store', 'data'),
+     Input('language-store', 'data')]
+)
+def update_status_bar(pumps_data, curve_data, lang):
+    """Update status bar based on loaded data"""
+    if not pumps_data:
+        return [
+            html.Div(className='status-indicator', children=[
+                html.I(className="fas fa-spinner fa-spin"),
+                html.Span("📊 Loading pump data...")
+            ])
+        ]
+    
+    pumps_count = len(pumps_data)
+    curve_count = len(curve_data)
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    return [
+        html.Div(className='status-indicator', children=[
+            html.I(className="fas fa-database"),
+            html.Span(get_text("Data loaded", lang, n_records=pumps_count, timestamp=timestamp))
+        ]),
+        html.Div(className='status-indicator', children=[
+            html.I(className="fas fa-chart-line"),
+            html.Span(f"Curve data: {curve_count} pumps")
+        ], style={'marginLeft': '24px'}),
+    ]
+
+@app.callback(
+    Output('main-content-output', 'children'),
+    [Input('pumps-data-store', 'data'),
+     Input('curve-data-store', 'data')]
+)
+def render_main_content(pumps_data, curve_data):
+    """Render main content only when data is available"""
+    if not pumps_data:
+        return html.Div(
+            className='modern-card',
+            style={'textAlign': 'center', 'padding': '60px'},
+            children=[
+                html.I(className="fas fa-spinner fa-spin", style={'fontSize': '48px', 'color': '#0066CC', 'marginBottom': '20px'}),
+                html.H3("Loading Pump Data...", style={'color': '#2c3e50'}),
+                html.P("Please wait while we fetch the latest pump information from our database.", style={'color': '#6b7280'})
+            ]
+        )
+    
+    return html.Div([
         # Main Content Area
         html.Div([
             # Sidebar - Input Controls
@@ -1194,12 +1259,8 @@ app.layout = html.Div([
                 ]),
             ], style={'width': '65%', 'display': 'inline-block', 'verticalAlign': 'top'}),
         ], style={'display': 'flex', 'gap': '0', 'padding': '24px'}),
-    ]),
-    
-    # Hidden div to trigger callbacks
-    html.Div(id='trigger-div', style={'display': 'none'}),
-])
-# --- Callbacks ---
+    ])
+    # --- All Callbacks ---
 
 @app.callback(
     [Output('language-store', 'data'),
@@ -1227,8 +1288,6 @@ app.layout = html.Div([
      Output('head-value-label', 'children'),
      Output('percentage-label', 'children'),
      Output('search-button', 'children'),
-     Output('refresh-button', 'children'),
-     Output('reset-button', 'children'),
      Output('results-title', 'children'),
      Output('curves-title', 'children')],
     [Input('language-dropdown', 'value')]
@@ -1240,16 +1299,6 @@ def update_language(selected_language):
     search_children = [
         html.I(className="fas fa-search", style={'marginRight': '8px'}),
         get_text("Search", lang)
-    ]
-    
-    refresh_children = [
-        html.I(className="fas fa-sync-alt", style={'marginRight': '8px'}),
-        get_text("Refresh Data", lang)
-    ]
-    
-    reset_children = [
-        html.I(className="fas fa-undo", style={'marginRight': '8px'}),
-        get_text("Reset Inputs", lang)
     ]
     
     results_title_children = [
@@ -1288,66 +1337,27 @@ def update_language(selected_language):
         get_text("TDH", lang),
         get_text("Show Percentage", lang),
         search_children,
-        refresh_children,
-        reset_children,
         results_title_children,
         curves_title_children
     )
 
 @app.callback(
-    [Output('data-info', 'children'),
-     Output('curve-info', 'children')],
-    [Input('trigger-div', 'children'),
-     Input('language-store', 'data'),
-     Input('refresh-button', 'n_clicks')]
-)
-def update_data_info(trigger, lang, refresh_clicks):
-    """Update data information display"""
-    global pumps_df, curve_df
-    
-    # Refresh data if refresh button was clicked
-    if refresh_clicks:
-        pumps_df = load_pump_data()
-        curve_df = load_pump_curve_data()
-    
-    pumps_count = len(pumps_df) if not pumps_df.empty else 0
-    curve_count = len(curve_df) if not curve_df.empty else 0
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
-    if pumps_count > 0:
-        data_text = get_text("Data loaded", lang, n_records=pumps_count, timestamp=timestamp)
-    else:
-        data_text = "⚠️ No pump data loaded. Check your connection or CSV files."
-    
-    if curve_count > 0:
-        curve_text = f"Curve data: {curve_count} pumps"
-    else:
-        curve_text = "⚠️ No curve data available"
-    
-    return data_text, curve_text
-
-@app.callback(
     [Output('category-dropdown', 'options'),
      Output('category-dropdown', 'value')],
-    [Input('language-store', 'data'),
-     Input('refresh-button', 'n_clicks')]
+    [Input('pumps-data-store', 'data'),
+     Input('language-store', 'data')]
 )
-def update_category_options(lang, refresh_clicks):
+def update_category_options(pumps_data, lang):
     """Update category dropdown options based on language and data"""
-    global pumps_df
+    if not pumps_data:
+        return [{'label': 'Loading...', 'value': 'loading'}], 'loading'
     
-    # Refresh data if refresh button was clicked
-    if refresh_clicks:
-        pumps_df = load_pump_data()
-    
-    if pumps_df.empty:
-        return [{'label': 'No data available', 'value': 'None'}], 'None'
+    pumps_df = pd.DataFrame(pumps_data)
     
     # Clean category data
     if "Category" in pumps_df.columns:
-        pumps_df_copy = pumps_df.copy()
-        pumps_df_copy["Category"] = pumps_df_copy["Category"].astype(str).str.strip().replace(["nan", "None", "NaN"], "")
-        unique_categories = [c for c in pumps_df_copy["Category"].unique() if c and c.strip() and c.lower() not in ["nan", "none", ""]]
+        pumps_df["Category"] = pumps_df["Category"].astype(str).str.strip().replace(["nan", "None", "NaN"], "")
+        unique_categories = [c for c in pumps_df["Category"].unique() if c and c.strip() and c.lower() not in ["nan", "none", ""]]
         
         options = [{'label': get_text("All Categories", lang), 'value': 'All Categories'}]
         for cat in sorted(unique_categories):
@@ -1361,18 +1371,17 @@ def update_category_options(lang, refresh_clicks):
 @app.callback(
     [Output('frequency-dropdown', 'options'),
      Output('frequency-dropdown', 'value')],
-    [Input('language-store', 'data'),
-     Input('refresh-button', 'n_clicks')]
+    [Input('pumps-data-store', 'data'),
+     Input('language-store', 'data')]
 )
-def update_frequency_options(lang, refresh_clicks):
+def update_frequency_options(pumps_data, lang):
     """Update frequency dropdown options"""
-    global pumps_df
+    if not pumps_data:
+        return [{'label': 'Loading...', 'value': 'loading'}], 'loading'
     
-    # Refresh data if refresh button was clicked
-    if refresh_clicks:
-        pumps_df = load_pump_data()
+    pumps_df = pd.DataFrame(pumps_data)
     
-    if pumps_df.empty or "Frequency (Hz)" not in pumps_df.columns:
+    if "Frequency (Hz)" not in pumps_df.columns:
         return [{'label': get_text("Show All Frequency", lang), 'value': 'All'}], 'All'
     
     freq_series = pd.to_numeric(pumps_df["Frequency (Hz)"], errors='coerce')
@@ -1387,18 +1396,17 @@ def update_frequency_options(lang, refresh_clicks):
 @app.callback(
     [Output('phase-dropdown', 'options'),
      Output('phase-dropdown', 'value')],
-    [Input('language-store', 'data'),
-     Input('refresh-button', 'n_clicks')]
+    [Input('pumps-data-store', 'data'),
+     Input('language-store', 'data')]
 )
-def update_phase_options(lang, refresh_clicks):
+def update_phase_options(pumps_data, lang):
     """Update phase dropdown options"""
-    global pumps_df
+    if not pumps_data:
+        return [{'label': 'Loading...', 'value': 'loading'}], 'loading'
     
-    # Refresh data if refresh button was clicked
-    if refresh_clicks:
-        pumps_df = load_pump_data()
+    pumps_df = pd.DataFrame(pumps_data)
     
-    if pumps_df.empty or "Phase" not in pumps_df.columns:
+    if "Phase" not in pumps_df.columns:
         return [{'label': get_text("Show All Phase", lang), 'value': 'All'}], 'All'
     
     phase_series = pd.to_numeric(pumps_df["Phase"], errors='coerce')
@@ -1505,7 +1513,8 @@ def reset_inputs(n_clicks):
      Output('results-info', 'children'),
      Output('results-table-container', 'children')],
     [Input('search-button', 'n_clicks')],
-    [State('category-dropdown', 'value'),
+    [State('pumps-data-store', 'data'),
+     State('category-dropdown', 'value'),
      State('frequency-dropdown', 'value'),
      State('phase-dropdown', 'value'),
      State('flow-value-input', 'value'),
@@ -1516,14 +1525,15 @@ def reset_inputs(n_clicks):
      State('percentage-slider', 'value'),
      State('language-store', 'data')]
 )
-def perform_search(n_clicks, category, frequency, phase, flow_value, head_value, particle_size, 
+def perform_search(n_clicks, pumps_data, category, frequency, phase, flow_value, head_value, particle_size, 
                   flow_unit, head_unit, percentage, lang):
     """Perform pump search based on criteria"""
-    global pumps_df
-    
-    if not n_clicks or pumps_df.empty:
-        empty_msg = "Click 'Search Pumps' to find matching pumps." if pumps_df.empty else "Run a search to see results."
+    if not n_clicks or not pumps_data:
+        empty_msg = "Click 'Search Pumps' to find matching pumps."
         return [], {'flow': 0, 'head': 0}, empty_msg, html.Div()
+    
+    # Convert data back to DataFrame
+    pumps_df = pd.DataFrame(pumps_data)
     
     # Filter pumps
     filtered_pumps = pumps_df.copy()
@@ -1693,21 +1703,21 @@ def update_selected_pumps(selected_rows, filtered_pumps_data):
     [Output('curves-info', 'children'),
      Output('curves-container', 'children')],
     [Input('selected-pumps-store', 'data')],
-    [State('user-operating-point-store', 'data'),
+    [State('curve-data-store', 'data'),
+     State('user-operating-point-store', 'data'),
      State('flow-unit-radio', 'value'),
      State('head-unit-radio', 'value'),
      State('language-store', 'data')]
 )
-def update_pump_curves(selected_models, operating_point, flow_unit, head_unit, lang):
+def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, head_unit, lang):
     """Update pump performance curves based on selected pumps"""
-    global curve_df
-    
-    if not selected_models or not selected_models[0] or curve_df.empty:
+    if not selected_models or not selected_models[0] or not curve_data:
         return html.Div(className='info-badge', children=[
             html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
             "Select pumps from the table above to view their performance curves."
         ]), html.Div()
     
+    curve_df = pd.DataFrame(curve_data)
     models = selected_models[0]
     user_flow = operating_point.get('flow', 0)
     user_head = operating_point.get('head', 0)

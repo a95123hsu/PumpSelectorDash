@@ -947,80 +947,42 @@ app.index_string = '''
 </html>
 '''
 
-# --- Modern App Layout with Proper Data Loading ---
 app.layout = html.Div([
-    # Data loading trigger
-    dcc.Interval(id="load-trigger", interval=500, max_intervals=1),
-    
-    # Store components for state management
-    dcc.Store(id='language-store', data='English'),
-    dcc.Store(id='pumps-data-store', data=[]),
-    dcc.Store(id='curve-data-store', data=[]),
-    dcc.Store(id='filtered-pumps-store', data=[]),
-    dcc.Store(id='selected-pumps-store', data=[]),
-    dcc.Store(id='user-operating-point-store', data={'flow': 0, 'head': 0}),
-    
-    # Main Container
-    html.Div(className='main-container', children=[
-        # Modern Header Section
-        html.Div(className='modern-card header-card', children=[
-            html.Div([
-                html.Div(className='logo-container', children=[
-                    html.Img(src="https://www.hungpump.com/images/340357"),
-                ]),
-                
-                html.Div([
-                    html.H1(id='app-title', className='app-title', children="Hung Pump"),
-                    html.P(id='main-title', className='app-subtitle', children="Professional Pump Selection Tool"),
-                ], style={'flex': '1'}),
-                
-                html.Div([
-                    dcc.Dropdown(
-                        id='language-dropdown',
-                        className='language-selector',
-                        options=[
-                            {'label': '🇺🇸 English', 'value': 'English'},
-                            {'label': '🇹🇼 繁體中文', 'value': '繁體中文'}
-                        ],
-                        value='English',
-                        clearable=False,
-                    )
-                ], style={'display': 'flex', 'alignItems': 'center'}),
-            ], style={
-                'display': 'flex',
-                'alignItems': 'center',
-                'justifyContent': 'space-between'
-            })
-        ]),
-        
-        # Status Bar with Loading
-        dcc.Loading(
-            id="loading-status",
-            type="circle",
-            children=html.Div(className='status-bar', children=[
-                html.Div([
-                    html.Div(id='data-status-output'),
-                ], style={'display': 'flex', 'alignItems': 'center'}),
-                
-                html.Div([
-                    html.Button(
-                        id='refresh-button',
-                        className='modern-button-secondary',
-                        children=[html.I(className="fas fa-sync-alt", style={'marginRight': '8px'}), "Refresh Data"]
-                    ),
-                    html.Button(
-                        id='reset-button',
-                        className='modern-button-secondary',
-                        children=[html.I(className="fas fa-undo", style={'marginRight': '8px'}), "Reset"],
-                        style={'marginLeft': '12px'}
-                    ),
-                ], style={'display': 'flex', 'alignItems': 'center'}),
-            ])
-        ),
-        
-        # Main Content Area - Only shown when data is loaded
-        html.Div(id='main-content-output'),
-    ]),
+    dcc.Store(id='language-store'),
+    html.H1(id='app-title'),
+    html.H2(id='main-title'),
+    html.H3(id='step1-title'),
+    html.Label(id='category-label'),
+    html.Label(id='frequency-label'),
+    html.Label(id='phase-label'),
+    html.H4(id='application-title'),
+    html.P(id='floor-faucet-info'),
+    html.Label(id='floors-label'),
+    dcc.Input(id='floors-input', type='number'),
+    html.Label(id='faucets-label'),
+    dcc.Input(id='faucets-input', type='number'),
+    html.H4(id='pond-title'),
+    html.Label(id='length-label'),
+    dcc.Input(id='length-input', type='number'),
+    html.Label(id='width-label'),
+    dcc.Input(id='width-input', type='number'),
+    html.Label(id='height-label'),
+    dcc.Input(id='height-input', type='number'),
+    html.Label(id='drain-time-label'),
+    dcc.Input(id='drain-time-input', type='number'),
+    html.Label(id='depth-label'),
+    dcc.Input(id='depth-input', type='number'),
+    html.Label(id='particle-label'),
+    dcc.Input(id='particle-input', type='number'),
+    html.H4(id='manual-title'),
+    html.Label(id='flow-unit-label'),
+    html.Label(id='flow-value-label'),
+    html.Label(id='head-unit-label'),
+    html.Label(id='head-value-label'),
+    html.Label(id='percentage-label'),
+    html.Button(id='search-button', children='Search'),
+    html.H4(id='results-title'),
+    html.H4(id='curves-title'),
 ])
 
 # --- Data Loading Callbacks ---

@@ -10,9 +10,29 @@ from datetime import datetime
 import json
 
 # --- Environment Setup ---
-load_dotenv()
+# Try loading from different locations for local development
+try:
+    load_dotenv("/etc/secrets/secrets.env")
+except:
+    pass
+
+try:
+    load_dotenv(".env")
+except:
+    pass
+
+# Get environment variables (Render sets these automatically)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+# Debug: Print environment variables (without exposing sensitive data)
+print(f"Environment: {'Render' if os.getenv('RENDER') else 'Local'}")
+print(f"SUPABASE_URL: {'✓ Set' if SUPABASE_URL else '✗ Not set'}")
+print(f"SUPABASE_KEY: {'✓ Set' if SUPABASE_KEY else '✗ Not set'}")
+if SUPABASE_URL:
+    print(f"URL starts with: {SUPABASE_URL[:30]}...")
+if SUPABASE_KEY:
+    print(f"Key starts with: {SUPABASE_KEY[:20]}...")
 
 # --- Translation Dictionary ---
 translations = {
@@ -254,60 +274,124 @@ def convert_head_to_m(value, from_unit):
 # --- Data Loading Functions ---
 def init_connection():
     """Initialize Supabase connection"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("❌ Supabase credentials not found in environment variables")
+        print("   Make sure SUPABASE_URL and SUPABASE_KEY are set in Render dashboard")
+        return None
+    
     try:
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("🔄 Attempting Supabase connection...")
+        client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        
+        # Test the connection with a simple query
+        print("🔍 Testing connection with simple query...")
+        test_response = client.table("pump_selection_data").select("*").limit(1).execute()
+        print("✅ Supabase connection successful!")
+        return client
+        
     except Exception as e:
-        print(f"Failed to connect to Supabase: {e}")
+        print(f"❌ Supabase connection failed: {str(e)}")
+        print(f"   Error type: {type(e).__name__}")
+        if "Invalid API key" in str(e):
+            print("   → Check your SUPABASE_KEY is correct")
+        elif "not found" in str(e).lower():
+            print("   → Check your table name 'pump_selection_data' exists")
+        elif "network" in str(e).lower() or "timeout" in str(e).lower():
+            print("   → Network connectivity issue")
         return None
 
 def load_pump_data():
-    """Load pump data from Supabase or CSV fallback"""
-    try:
-        supabase = init_connection()
-        if supabase:
-            all_records, page_size, current_page = [], 1000, 0
-            while True:
-                response = supabase.table("pump_selection_data").select("*") \
-                    .range(current_page * page_size, (current_page + 1) * page_size - 1).execute()
-                if not response.data:
-                    break
-                all_records.extend(response.data)
-                current_page += 1
-                if len(response.data) < page_size:
-                    break
-            return pd.DataFrame(all_records)
-    except Exception as e:
-        print(f"Failed to load from Supabase: {e}")
+    """Load pump data from Supabase"""
+    print("\n📊 Loading pump data...")
     
     try:
-        return pd.read_csv("Pump Selection Data.csv")
+        supabase = init_connection()
+        if not supabase:
+            print("❌ No Supabase connection available")
+            return pd.DataFrame()
+            
+        print("🔄 Fetching pump data from Supabase...")
+        all_records = []
+        page_size = 1000
+        current_page = 0
+        
+        while True:
+            print(f"   📄 Fetching page {current_page + 1} (records {current_page * page_size + 1}-{(current_page + 1) * page_size})...")
+            
+            response = supabase.table("pump_selection_data").select("*") \
+                .range(current_page * page_size, (current_page + 1) * page_size - 1).execute()
+            
+            if not response.data:
+                print(f"   ✅ No more data on page {current_page + 1}")
+                break
+                
+            all_records.extend(response.data)
+            print(f"   ✅ Got {len(response.data)} records from page {current_page + 1}")
+            
+            current_page += 1
+            if len(response.data) < page_size:
+                print("   🏁 Reached end of data (page not full)")
+                break
+        
+        if all_records:
+            df = pd.DataFrame(all_records)
+            print(f"✅ Successfully loaded {len(df)} pump records")
+            print(f"   Columns: {list(df.columns)}")
+            return df
+        else:
+            print("⚠️  No pump data found in Supabase table")
+            return pd.DataFrame()
+            
     except Exception as e:
-        print(f"Failed to load CSV: {e}")
+        print(f"❌ Error loading pump data: {str(e)}")
+        print(f"   Error type: {type(e).__name__}")
         return pd.DataFrame()
 
 def load_pump_curve_data():
-    """Load pump curve data from Supabase or CSV fallback"""
-    try:
-        supabase = init_connection()
-        if supabase:
-            all_records, page_size, current_page = [], 1000, 0
-            while True:
-                response = supabase.table("pump_curve_data").select("*") \
-                    .range(current_page * page_size, (current_page + 1) * page_size - 1).execute()
-                if not response.data:
-                    break
-                all_records.extend(response.data)
-                current_page += 1
-                if len(response.data) < page_size:
-                    break
-            return pd.DataFrame(all_records)
-    except Exception as e:
-        print(f"Failed to load curve data from Supabase: {e}")
+    """Load pump curve data from Supabase"""
+    print("\n📈 Loading curve data...")
     
     try:
-        return pd.read_csv("pump_curve_data_rows 1.csv")
+        supabase = init_connection()
+        if not supabase:
+            print("❌ No Supabase connection available")
+            return pd.DataFrame()
+            
+        print("🔄 Fetching curve data from Supabase...")
+        all_records = []
+        page_size = 1000
+        current_page = 0
+        
+        while True:
+            print(f"   📄 Fetching page {current_page + 1} (records {current_page * page_size + 1}-{(current_page + 1) * page_size})...")
+            
+            response = supabase.table("pump_curve_data").select("*") \
+                .range(current_page * page_size, (current_page + 1) * page_size - 1).execute()
+            
+            if not response.data:
+                print(f"   ✅ No more data on page {current_page + 1}")
+                break
+                
+            all_records.extend(response.data)
+            print(f"   ✅ Got {len(response.data)} records from page {current_page + 1}")
+            
+            current_page += 1
+            if len(response.data) < page_size:
+                print("   🏁 Reached end of data (page not full)")
+                break
+        
+        if all_records:
+            df = pd.DataFrame(all_records)
+            print(f"✅ Successfully loaded {len(df)} curve records")
+            print(f"   Columns: {list(df.columns)}")
+            return df
+        else:
+            print("⚠️  No curve data found in Supabase table")
+            return pd.DataFrame()
+            
     except Exception as e:
-        print(f"Failed to load curve CSV: {e}")
+        print(f"❌ Error loading curve data: {str(e)}")
+        print(f"   Error type: {type(e).__name__}")
         return pd.DataFrame()
 
 # --- Chart Creation Functions ---
@@ -868,6 +952,14 @@ app.index_string = '''
 pumps_df = load_pump_data()
 curve_df = load_pump_curve_data()
 
+# Print debug info
+print(f"Loaded {len(pumps_df)} pump records")
+print(f"Loaded {len(curve_df)} curve records")
+if not pumps_df.empty:
+    print(f"Pump columns: {list(pumps_df.columns)}")
+if not curve_df.empty:
+    print(f"Curve columns: {list(curve_df.columns)}")
+
 # --- Modern App Layout ---
 app.layout = html.Div([
     # Store components for state management
@@ -1107,7 +1199,6 @@ app.layout = html.Div([
     # Hidden div to trigger callbacks
     html.Div(id='trigger-div', style={'display': 'none'}),
 ])
-
 # --- Callbacks ---
 
 @app.callback(
@@ -1207,33 +1298,56 @@ def update_language(selected_language):
     [Output('data-info', 'children'),
      Output('curve-info', 'children')],
     [Input('trigger-div', 'children'),
-     Input('language-store', 'data')]
+     Input('language-store', 'data'),
+     Input('refresh-button', 'n_clicks')]
 )
-def update_data_info(trigger, lang):
+def update_data_info(trigger, lang, refresh_clicks):
     """Update data information display"""
+    global pumps_df, curve_df
+    
+    # Refresh data if refresh button was clicked
+    if refresh_clicks:
+        pumps_df = load_pump_data()
+        curve_df = load_pump_curve_data()
+    
     pumps_count = len(pumps_df) if not pumps_df.empty else 0
     curve_count = len(curve_df) if not curve_df.empty else 0
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    data_text = get_text("Data loaded", lang, n_records=pumps_count, timestamp=timestamp)
-    curve_text = f"Curve data: {curve_count} pumps" if curve_count > 0 else ""
+    if pumps_count > 0:
+        data_text = get_text("Data loaded", lang, n_records=pumps_count, timestamp=timestamp)
+    else:
+        data_text = "⚠️ No pump data loaded. Check your connection or CSV files."
+    
+    if curve_count > 0:
+        curve_text = f"Curve data: {curve_count} pumps"
+    else:
+        curve_text = "⚠️ No curve data available"
     
     return data_text, curve_text
 
 @app.callback(
     [Output('category-dropdown', 'options'),
      Output('category-dropdown', 'value')],
-    [Input('language-store', 'data')]
+    [Input('language-store', 'data'),
+     Input('refresh-button', 'n_clicks')]
 )
-def update_category_options(lang):
+def update_category_options(lang, refresh_clicks):
     """Update category dropdown options based on language and data"""
+    global pumps_df
+    
+    # Refresh data if refresh button was clicked
+    if refresh_clicks:
+        pumps_df = load_pump_data()
+    
     if pumps_df.empty:
-        return [], None
+        return [{'label': 'No data available', 'value': 'None'}], 'None'
     
     # Clean category data
     if "Category" in pumps_df.columns:
-        pumps_df["Category"] = pumps_df["Category"].astype(str).str.strip().replace(["nan", "None", "NaN"], "")
-        unique_categories = [c for c in pumps_df["Category"].unique() if c and c.strip() and c.lower() not in ["nan", "none"]]
+        pumps_df_copy = pumps_df.copy()
+        pumps_df_copy["Category"] = pumps_df_copy["Category"].astype(str).str.strip().replace(["nan", "None", "NaN"], "")
+        unique_categories = [c for c in pumps_df_copy["Category"].unique() if c and c.strip() and c.lower() not in ["nan", "none", ""]]
         
         options = [{'label': get_text("All Categories", lang), 'value': 'All Categories'}]
         for cat in sorted(unique_categories):
@@ -1247,10 +1361,17 @@ def update_category_options(lang):
 @app.callback(
     [Output('frequency-dropdown', 'options'),
      Output('frequency-dropdown', 'value')],
-    [Input('language-store', 'data')]
+    [Input('language-store', 'data'),
+     Input('refresh-button', 'n_clicks')]
 )
-def update_frequency_options(lang):
+def update_frequency_options(lang, refresh_clicks):
     """Update frequency dropdown options"""
+    global pumps_df
+    
+    # Refresh data if refresh button was clicked
+    if refresh_clicks:
+        pumps_df = load_pump_data()
+    
     if pumps_df.empty or "Frequency (Hz)" not in pumps_df.columns:
         return [{'label': get_text("Show All Frequency", lang), 'value': 'All'}], 'All'
     
@@ -1266,10 +1387,17 @@ def update_frequency_options(lang):
 @app.callback(
     [Output('phase-dropdown', 'options'),
      Output('phase-dropdown', 'value')],
-    [Input('language-store', 'data')]
+    [Input('language-store', 'data'),
+     Input('refresh-button', 'n_clicks')]
 )
-def update_phase_options(lang):
+def update_phase_options(lang, refresh_clicks):
     """Update phase dropdown options"""
+    global pumps_df
+    
+    # Refresh data if refresh button was clicked
+    if refresh_clicks:
+        pumps_df = load_pump_data()
+    
     if pumps_df.empty or "Phase" not in pumps_df.columns:
         return [{'label': get_text("Show All Phase", lang), 'value': 'All'}], 'All'
     
@@ -1391,8 +1519,11 @@ def reset_inputs(n_clicks):
 def perform_search(n_clicks, category, frequency, phase, flow_value, head_value, particle_size, 
                   flow_unit, head_unit, percentage, lang):
     """Perform pump search based on criteria"""
+    global pumps_df
+    
     if not n_clicks or pumps_df.empty:
-        return [], {'flow': 0, 'head': 0}, "Run a search to see results.", html.Div()
+        empty_msg = "Click 'Search Pumps' to find matching pumps." if pumps_df.empty else "Run a search to see results."
+        return [], {'flow': 0, 'head': 0}, empty_msg, html.Div()
     
     # Filter pumps
     filtered_pumps = pumps_df.copy()
@@ -1569,6 +1700,8 @@ def update_selected_pumps(selected_rows, filtered_pumps_data):
 )
 def update_pump_curves(selected_models, operating_point, flow_unit, head_unit, lang):
     """Update pump performance curves based on selected pumps"""
+    global curve_df
+    
     if not selected_models or not selected_models[0] or curve_df.empty:
         return html.Div(className='info-badge', children=[
             html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
@@ -1651,5 +1784,15 @@ def update_pump_curves(selected_models, operating_point, flow_unit, head_unit, l
 
 # --- Run the App ---
 server = app.server
+
 if __name__ == '__main__':
-    app.run_server(debug=True, host='0.0.0.0', port=8050)
+    # Get port from environment variable (Render sets this automatically)
+    port = int(os.environ.get('PORT', 8050))
+    
+    # For Render deployment
+    if os.getenv('RENDER'):
+        print(f"🚀 Starting app on Render (port {port})...")
+        app.run_server(debug=False, host='0.0.0.0', port=port)
+    else:
+        print(f"🚀 Starting app locally (port {port})...")
+        app.run_server(debug=True, host='0.0.0.0', port=port)

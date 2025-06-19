@@ -1089,5 +1089,6 @@ def update_pump_curves(selected_models, operating_point, flow_unit, head_unit, l
     return info_text, html.Div(charts)
 
 # --- Run the App ---
+server = app.server
 if __name__ == '__main__':
     app.run_server(debug=True)

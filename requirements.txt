@@ -2,6 +2,7 @@
 dash
 plotly
 dash-table
+gunicorn
 
 # Data manipulation and analysis
 pandas

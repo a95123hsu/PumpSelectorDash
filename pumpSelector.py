@@ -10,7 +10,7 @@ from datetime import datetime
 import json
 
 # --- Environment Setup ---
-load_dotenv()
+load_dotenv("/etc/secrets/secrets.env")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 

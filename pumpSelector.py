@@ -1,5 +1,5 @@
 import dash
-from dash import dcc, html, dash_table, Input, Output, State, callback, ALL
+from dash import dcc, html, dash_table, Input, Output, State, callback, ALL, ctx
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
@@ -8,6 +8,11 @@ import os
 from dotenv import load_dotenv
 from datetime import datetime
 import json
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # --- Environment Setup ---
 # Try loading from different locations for local development
@@ -29,12 +34,8 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 print(f"Environment: {'Render' if os.getenv('RENDER') else 'Local'}")
 print(f"SUPABASE_URL: {'✓ Set' if SUPABASE_URL else '✗ Not set'}")
 print(f"SUPABASE_KEY: {'✓ Set' if SUPABASE_KEY else '✗ Not set'}")
-if SUPABASE_URL:
-    print(f"URL starts with: {SUPABASE_URL[:30]}...")
-if SUPABASE_KEY:
-    print(f"Key starts with: {SUPABASE_KEY[:20]}...")
 
-# --- Translation Dictionary ---
+# --- Enhanced Translation Dictionary ---
 translations = {
     "English": {
         # App title and headers
@@ -56,8 +57,15 @@ translations = {
         "Phase": "Phase:",
         "Select...": "Select...",
         "All Categories": "All Categories",
-        "Show All Frequency": "Show All Frequency",
+        "Show All Frequency": "Show All Frequency", 
         "Show All Phase": "Show All Phase",
+        
+        # Column Selection - NEW
+        "Column Selection": "Column Selection",
+        "Select Columns": "Select columns to display in results:",
+        "Select All": "Select All",
+        "Deselect All": "Deselect All", 
+        "Essential Columns": "Essential Columns (always shown)",
         
         # Categories
         "Dirty Water": "Dirty Water",
@@ -96,24 +104,38 @@ translations = {
         "Head Unit": "Head Unit",
         "TDH": "Total Dynamic Head (TDH)",
         
+        # Estimated application - NEW
+        "Estimated Application": "Estimated Application (based on Manual Input)",
+        "Estimated Floors": "Estimated Floors",
+        "Estimated Faucets": "Estimated Faucets",
+        
         # Results
         "Result Display": "Result Display Control",
         "Show Percentage": "Show Top Percentage of Results",
         "Matching Pumps": "✅ Matching Pumps",
         "Found Pumps": "Found {count} matching pumps",
         "View Product": "View Product",
+        "Select Pumps": "Select pumps from the table below to view their performance curves",
+        "Showing Results": "Showing {count} results out of {total} total",
         
-        # Pump Curves
+        # Pump Curves - ENHANCED
         "Pump Curves": "Pump Performance Curves",
         "Performance Curve": "Performance Curve - {model}",
         "Flow Rate": "Flow Rate ({unit})",
         "Head": "Head ({unit})",
         "Operating Point": "Your Operating Point",
         "Multiple Curves": "Performance Comparison",
+        "Compare Pumps": "Compare Selected Pumps",
+        "Select Multiple": "Select multiple pumps to compare:",
+        "Selected Pumps": "Selected {count} pump(s) for curve visualization",
+        "No Curve Data": "No curve data available for this pump model",
+        "Curve Data Loaded": "Curve data loaded: {count} pumps with curve data",
+        "Individual Curves": "Individual Pump Curves",
+        "View Individual": "View Individual Curves",
         
         # Units
         "L/min": "L/min",
-        "L/sec": "L/sec",
+        "L/sec": "L/sec", 
         "m³/hr": "m³/hr",
         "m³/min": "m³/min",
         "US gpm": "US gpm",
@@ -124,6 +146,10 @@ translations = {
         "No Matches": "⚠️ No pumps match your criteria. Try adjusting the parameters.",
         "Failed Connection": "❌ Failed to connect to Supabase: {error}",
         "No Data": "❌ No pump data available. Please check your connection.",
+        "Select Warning": "Please select Frequency and Phase to proceed.",
+        "Failed Data": "❌ Failed to load data from Supabase: {error}",
+        "Failed CSV": "❌ Failed to load CSV file: {error}",
+        "Failed Curve Data": "❌ Failed to load curve data: {error}",
     },
     "繁體中文": {
         # App title and headers
@@ -147,6 +173,13 @@ translations = {
         "All Categories": "所有類別",
         "Show All Frequency": "顯示所有頻率",
         "Show All Phase": "顯示所有相數",
+        
+        # Column Selection - NEW
+        "Column Selection": "欄位選擇",
+        "Select Columns": "選擇要在結果中顯示的欄位:",
+        "Select All": "全選",
+        "Deselect All": "全部取消",
+        "Essential Columns": "必要欄位 (總是顯示)",
         
         # Categories - translated to Traditional Chinese
         "Dirty Water": "污水泵",
@@ -185,20 +218,34 @@ translations = {
         "Head Unit": "揚程單位",
         "TDH": "總動態揚程 (TDH)",
         
+        # Estimated application - NEW
+        "Estimated Application": "估計應用 (基於手動輸入)",
+        "Estimated Floors": "估計樓層",
+        "Estimated Faucets": "估計水龍頭",
+        
         # Results
         "Result Display": "結果顯示控制",
         "Show Percentage": "顯示前百分比的結果",
         "Matching Pumps": "✅ 符合條件的幫浦",
         "Found Pumps": "找到 {count} 個符合的幫浦",
         "View Product": "查看產品",
+        "Select Pumps": "從下表選擇幫浦以查看其性能曲線",
+        "Showing Results": "顯示 {count} 筆結果，共 {total} 筆",
         
-        # Pump Curves
+        # Pump Curves - ENHANCED
         "Pump Curves": "幫浦性能曲線",
         "Performance Curve": "性能曲線 - {model}",
         "Flow Rate": "流量 ({unit})",
         "Head": "揚程 ({unit})",
         "Operating Point": "您的操作點",
         "Multiple Curves": "性能比較",
+        "Compare Pumps": "比較選定的幫浦",
+        "Select Multiple": "選擇多個幫浦進行比較:",
+        "Selected Pumps": "已選擇 {count} 個幫浦進行曲線視覺化",
+        "No Curve Data": "此幫浦型號無曲線資料",
+        "Curve Data Loaded": "曲線資料已載入: {count} 個幫浦有曲線資料",
+        "Individual Curves": "個別幫浦曲線",
+        "View Individual": "查看個別曲線",
         
         # Units
         "L/min": "公升/分鐘",
@@ -213,6 +260,10 @@ translations = {
         "No Matches": "⚠️ 沒有符合您條件的幫浦。請調整參數。",
         "Failed Connection": "❌ 連接到 Supabase 失敗: {error}",
         "No Data": "❌ 無可用幫浦資料。請檢查您的連接。",
+        "Select Warning": "請選擇頻率和相數以繼續。",
+        "Failed Data": "❌ 從 Supabase 載入資料失敗: {error}",
+        "Failed CSV": "❌ 載入 CSV 檔案失敗: {error}",
+        "Failed Curve Data": "❌ 載入曲線資料失敗: {error}",
     }
 }
 
@@ -271,12 +322,11 @@ def convert_head_to_m(value, from_unit):
         return value * 0.3048
     return value
 
-# --- Data Loading Functions ---
+# --- Enhanced Data Loading Functions ---
 def init_connection():
-    """Initialize Supabase connection"""
+    """Initialize Supabase connection with fallback support"""
     if not SUPABASE_URL or not SUPABASE_KEY:
         print("❌ Supabase credentials not found in environment variables")
-        print("   Make sure SUPABASE_URL and SUPABASE_KEY are set in Render dashboard")
         return None
     
     try:
@@ -291,24 +341,17 @@ def init_connection():
         
     except Exception as e:
         print(f"❌ Supabase connection failed: {str(e)}")
-        print(f"   Error type: {type(e).__name__}")
-        if "Invalid API key" in str(e):
-            print("   → Check your SUPABASE_KEY is correct")
-        elif "not found" in str(e).lower():
-            print("   → Check your table name 'pump_selection_data' exists")
-        elif "network" in str(e).lower() or "timeout" in str(e).lower():
-            print("   → Network connectivity issue")
         return None
 
 def load_pump_data():
-    """Load pump data from Supabase"""
+    """Load pump data from Supabase with CSV fallback"""
     print("\n📊 Loading pump data...")
     
     try:
         supabase = init_connection()
         if not supabase:
-            print("❌ No Supabase connection available")
-            return pd.DataFrame()
+            print("⚠️ No Supabase connection, trying CSV fallback...")
+            return load_csv_fallback("Pump Selection Data.csv")
             
         print("🔄 Fetching pump data from Supabase...")
         all_records = []
@@ -316,7 +359,7 @@ def load_pump_data():
         current_page = 0
         
         while True:
-            print(f"   📄 Fetching page {current_page + 1} (records {current_page * page_size + 1}-{(current_page + 1) * page_size})...")
+            print(f"   📄 Fetching page {current_page + 1}...")
             
             response = supabase.table("pump_selection_data").select("*") \
                 .range(current_page * page_size, (current_page + 1) * page_size - 1).execute()
@@ -330,32 +373,31 @@ def load_pump_data():
             
             current_page += 1
             if len(response.data) < page_size:
-                print("   🏁 Reached end of data (page not full)")
+                print("   🏁 Reached end of data")
                 break
         
         if all_records:
             df = pd.DataFrame(all_records)
-            print(f"✅ Successfully loaded {len(df)} pump records")
-            print(f"   Columns: {list(df.columns)}")
+            print(f"✅ Successfully loaded {len(df)} pump records from Supabase")
             return df
         else:
-            print("⚠️  No pump data found in Supabase table")
-            return pd.DataFrame()
+            print("⚠️ No pump data found in Supabase, trying CSV fallback...")
+            return load_csv_fallback("Pump Selection Data.csv")
             
     except Exception as e:
-        print(f"❌ Error loading pump data: {str(e)}")
-        print(f"   Error type: {type(e).__name__}")
-        return pd.DataFrame()
+        print(f"❌ Error loading pump data from Supabase: {str(e)}")
+        print("⚠️ Trying CSV fallback...")
+        return load_csv_fallback("Pump Selection Data.csv")
 
 def load_pump_curve_data():
-    """Load pump curve data from Supabase"""
+    """Load pump curve data from Supabase with CSV fallback"""
     print("\n📈 Loading curve data...")
     
     try:
         supabase = init_connection()
         if not supabase:
-            print("❌ No Supabase connection available")
-            return pd.DataFrame()
+            print("⚠️ No Supabase connection, trying CSV fallback...")
+            return load_csv_fallback("pump_curve_data_rows 1.csv")
             
         print("🔄 Fetching curve data from Supabase...")
         all_records = []
@@ -363,7 +405,7 @@ def load_pump_curve_data():
         current_page = 0
         
         while True:
-            print(f"   📄 Fetching page {current_page + 1} (records {current_page * page_size + 1}-{(current_page + 1) * page_size})...")
+            print(f"   📄 Fetching page {current_page + 1}...")
             
             response = supabase.table("pump_curve_data").select("*") \
                 .range(current_page * page_size, (current_page + 1) * page_size - 1).execute()
@@ -377,24 +419,33 @@ def load_pump_curve_data():
             
             current_page += 1
             if len(response.data) < page_size:
-                print("   🏁 Reached end of data (page not full)")
+                print("   🏁 Reached end of data")
                 break
         
         if all_records:
             df = pd.DataFrame(all_records)
-            print(f"✅ Successfully loaded {len(df)} curve records")
-            print(f"   Columns: {list(df.columns)}")
+            print(f"✅ Successfully loaded {len(df)} curve records from Supabase")
             return df
         else:
-            print("⚠️  No curve data found in Supabase table")
-            return pd.DataFrame()
+            print("⚠️ No curve data found in Supabase, trying CSV fallback...")
+            return load_csv_fallback("pump_curve_data_rows 1.csv")
             
     except Exception as e:
-        print(f"❌ Error loading curve data: {str(e)}")
-        print(f"   Error type: {type(e).__name__}")
+        print(f"❌ Error loading curve data from Supabase: {str(e)}")
+        print("⚠️ Trying CSV fallback...")
+        return load_csv_fallback("pump_curve_data_rows 1.csv")
+
+def load_csv_fallback(filename):
+    """Load data from CSV file as fallback"""
+    try:
+        df = pd.read_csv(filename)
+        print(f"✅ Successfully loaded {len(df)} records from CSV: {filename}")
+        return df
+    except Exception as e:
+        print(f"❌ Error loading CSV {filename}: {str(e)}")
         return pd.DataFrame()
 
-# --- Chart Creation Functions ---
+# --- Enhanced Chart Creation Functions ---
 def create_pump_curve_chart(curve_data, model_no, user_flow=None, user_head=None, flow_unit="L/min", head_unit="m", lang="English"):
     """Create performance curve chart for a single pump"""
     head_columns = [col for col in curve_data.columns if col.endswith('M') and col not in ['Max Head(M)']]
@@ -558,7 +609,7 @@ def create_comparison_chart(curve_data, model_nos, user_flow=None, user_head=Non
 app = dash.Dash(__name__)
 app.title = "Hung Pump - Professional Pump Selection Tool"
 
-# Custom CSS for modern styling
+# Enhanced CSS styling (keeping your existing styles and adding new features)
 app.index_string = '''
 <!DOCTYPE html>
 <html>
@@ -572,6 +623,7 @@ app.index_string = '''
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <style>
+            /* Your existing CSS styles here */
             :root {
                 --primary-color: #0066CC;
                 --secondary-color: #4A90E2;
@@ -588,9 +640,7 @@ app.index_string = '''
                 --border-radius: 12px;
             }
             
-            * {
-                box-sizing: border-box;
-            }
+            * { box-sizing: border-box; }
             
             body {
                 font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif !important;
@@ -678,6 +728,7 @@ app.index_string = '''
                 border-color: var(--primary-color) !important;
                 box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1) !important;
             }
+            
             .modern-button-primary {
                 background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%) !important;
                 color: white !important;
@@ -766,11 +817,81 @@ app.index_string = '''
                 margin-bottom: 16px !important;
             }
             
+            /* Column selection styles */
+            .column-selection-card {
+                background: #f8f9fa !important;
+                border: 1px solid var(--border-color) !important;
+                border-radius: var(--border-radius) !important;
+                padding: 16px !important;
+                margin-bottom: 16px !important;
+            }
+            
+            .column-checkbox-container {
+                display: flex !important;
+                flex-wrap: wrap !important;
+                gap: 12px !important;
+                margin-top: 12px !important;
+            }
+            
+            .column-checkbox {
+                background: white !important;
+                border: 1px solid var(--border-color) !important;
+                border-radius: 6px !important;
+                padding: 8px 12px !important;
+                cursor: pointer !important;
+                transition: all 0.2s ease !important;
+                font-size: 14px !important;
+            }
+            
+            .column-checkbox.selected {
+                background: var(--primary-color) !important;
+                color: white !important;
+                border-color: var(--primary-color) !important;
+            }
+            
+            .column-checkbox:hover {
+                border-color: var(--primary-color) !important;
+            }
+            
+            /* Estimated application styles */
+            .estimation-card {
+                background: linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%) !important;
+                border-left: 4px solid var(--primary-color) !important;
+                padding: 16px !important;
+                border-radius: 8px !important;
+                margin: 16px 0 !important;
+            }
+            
+            .estimation-metric {
+                display: flex !important;
+                justify-content: space-between !important;
+                align-items: center !important;
+                padding: 8px 0 !important;
+                border-bottom: 1px solid #e5e7eb !important;
+            }
+            
+            .estimation-metric:last-child {
+                border-bottom: none !important;
+            }
+            
+            .estimation-label {
+                font-weight: 500 !important;
+                color: var(--dark-color) !important;
+            }
+            
+            .estimation-value {
+                font-weight: 700 !important;
+                color: var(--primary-color) !important;
+                font-size: 18px !important;
+            }
+            
+            /* Enhanced table styles */
             .data-table-container {
                 border-radius: var(--border-radius) !important;
                 overflow: hidden !important;
                 box-shadow: var(--shadow-md) !important;
                 border: 1px solid var(--border-color) !important;
+                margin-bottom: 24px !important;
             }
             
             .dash-table-container table {
@@ -779,11 +900,6 @@ app.index_string = '''
             
             .dash-table-container .dash-spreadsheet-container {
                 border-radius: var(--border-radius) !important;
-            }
-            
-            .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner table {
-                border-collapse: separate !important;
-                border-spacing: 0 !important;
             }
             
             .dash-table-container .dash-header {
@@ -803,6 +919,29 @@ app.index_string = '''
                 background: rgba(0, 102, 204, 0.05) !important;
             }
             
+            /* Enhanced checkbox styles */
+            input[type="checkbox"] {
+                transform: scale(1.2) !important;
+                accent-color: var(--primary-color) !important;
+                margin-right: 8px !important;
+            }
+            
+            /* Radio button styles */
+            .radio-group label {
+                margin-right: 20px !important;
+                font-weight: 500 !important;
+                color: var(--dark-color) !important;
+                display: inline-flex !important;
+                align-items: center !important;
+            }
+            
+            .radio-group input[type="radio"] {
+                margin-right: 8px !important;
+                transform: scale(1.2) !important;
+                accent-color: var(--primary-color) !important;
+            }
+            
+            /* Slider styles */
             .slider-container .rc-slider {
                 margin: 16px 0 !important;
             }
@@ -819,88 +958,6 @@ app.index_string = '''
                 height: 20px !important;
                 margin-top: -7px !important;
                 box-shadow: var(--shadow-md) !important;
-            }
-            
-            .radio-group label {
-                margin-right: 20px !important;
-                font-weight: 500 !important;
-                color: var(--dark-color) !important;
-            }
-            
-            .radio-group input[type="radio"] {
-                margin-right: 8px !important;
-                transform: scale(1.2) !important;
-                accent-color: var(--primary-color) !important;
-            }
-            
-            .sidebar {
-                background: rgba(255, 255, 255, 0.9) !important;
-                backdrop-filter: blur(10px) !important;
-                border-radius: var(--border-radius) !important;
-                padding: 24px !important;
-                margin-right: 24px !important;
-                box-shadow: var(--shadow-md) !important;
-                border: 1px solid var(--border-color) !important;
-            }
-            
-            .content-area {
-                background: rgba(255, 255, 255, 0.9) !important;
-                backdrop-filter: blur(10px) !important;
-                border-radius: var(--border-radius) !important;
-                padding: 24px !important;
-                box-shadow: var(--shadow-md) !important;
-                border: 1px solid var(--border-color) !important;
-            }
-            
-            .status-indicator {
-                display: inline-flex !important;
-                align-items: center !important;
-                font-size: 14px !important;
-                color: var(--dark-color) !important;
-            }
-            
-            .status-indicator i {
-                margin-right: 8px !important;
-                color: var(--primary-color) !important;
-            }
-            
-            .language-selector {
-                min-width: 160px !important;
-            }
-            
-            .logo-container {
-                display: flex !important;
-                align-items: center !important;
-            }
-            
-            .logo-container img {
-                filter: brightness(0) invert(1) !important;
-                height: 60px !important;
-                width: auto !important;
-            }
-            
-            .app-title {
-                color: white !important;
-                margin: 0 0 4px 24px !important;
-                font-size: 32px !important;
-                font-weight: 700 !important;
-            }
-            
-            .app-subtitle {
-                color: rgba(255, 255, 255, 0.9) !important;
-                margin: 0 0 0 24px !important;
-                font-size: 16px !important;
-                font-weight: 400 !important;
-            }
-            
-            /* Animations */
-            @keyframes fadeIn {
-                from { opacity: 0; transform: translateY(20px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-            
-            .modern-card {
-                animation: fadeIn 0.5s ease-out !important;
             }
             
             /* Loading states */
@@ -947,18 +1004,20 @@ app.index_string = '''
 </html>
 '''
 
-# --- Modern App Layout with Proper Data Loading ---
+# --- Enhanced App Layout ---
 app.layout = html.Div([
     # Data loading trigger
     dcc.Interval(id="load-trigger", interval=500, max_intervals=1),
     
-    # Store components for state management
+    # Store components for state management (enhanced)
     dcc.Store(id='language-store', data='English'),
     dcc.Store(id='pumps-data-store', data=[]),
     dcc.Store(id='curve-data-store', data=[]),
     dcc.Store(id='filtered-pumps-store', data=[]),
     dcc.Store(id='selected-pumps-store', data=[]),
     dcc.Store(id='user-operating-point-store', data={'flow': 0, 'head': 0}),
+    dcc.Store(id='selected-columns-store', data=[]),  # NEW
+    dcc.Store(id='estimation-store', data={'floors': 0, 'faucets': 0}),  # NEW
     
     # Main Container
     html.Div(className='main-container', children=[
@@ -1018,13 +1077,12 @@ app.layout = html.Div([
             ])
         ),
         
-        # Main Content Area - Only shown when data is loaded
+        # Main Content Area
         html.Div(id='main-content-output'),
     ]),
 ])
 
-# --- Data Loading Callbacks ---
-
+# --- Enhanced Data Loading Callbacks ---
 @app.callback(
     [Output('pumps-data-store', 'data'),
      Output('curve-data-store', 'data')],
@@ -1032,7 +1090,7 @@ app.layout = html.Div([
      Input('refresh-button', 'n_clicks')]
 )
 def fetch_data(n_intervals, refresh_clicks):
-    """Load data from Supabase into stores"""
+    """Load data from Supabase or CSV fallback"""
     print("🔄 Fetching data for app...")
     
     pumps_df = load_pump_data()
@@ -1073,7 +1131,7 @@ def update_status_bar(pumps_data, curve_data, lang):
         ]),
         html.Div(className='status-indicator', children=[
             html.I(className="fas fa-chart-line"),
-            html.Span(f"Curve data: {curve_count} pumps")
+            html.Span(get_text("Curve Data Loaded", lang, count=curve_count))
         ], style={'marginLeft': '24px'}),
     ]
 
@@ -1117,7 +1175,29 @@ def render_main_content(pumps_data, curve_data):
                     dcc.Dropdown(id='phase-dropdown', placeholder="Select...", className='modern-input'),
                 ]),
                 
-                # Application Input (for Booster category)
+                # Column Selection Section - NEW
+                html.Div(id='column-selection-section', className='modern-card', children=[
+                    html.H4(id='column-selection-title', className='section-title', children=[
+                        html.I(className="fas fa-columns"),
+                        "Column Selection"
+                    ]),
+                    html.P(id='column-selection-desc', children="Select columns to display in results:", 
+                           style={'color': '#6b7280', 'marginBottom': '16px'}),
+                    
+                    html.Div([
+                        html.Button(id='select-all-btn', children="Select All", className='modern-button-secondary', 
+                                   style={'marginRight': '8px', 'fontSize': '12px', 'padding': '6px 12px'}),
+                        html.Button(id='deselect-all-btn', children="Deselect All", className='modern-button-secondary',
+                                   style={'fontSize': '12px', 'padding': '6px 12px'}),
+                    ], style={'marginBottom': '12px'}),
+                    
+                    html.Div(id='column-checkboxes-container', children=[]),
+                    
+                    html.Small(id='essential-columns-note', children="Essential columns (Model, Model No.) are always shown",
+                              style={'color': '#6b7280', 'fontStyle': 'italic'})
+                ]),
+                
+                # Application Input (for Booster category) - ENHANCED
                 html.Div(id='application-section', className='modern-card', children=[
                     html.H4(id='application-title', className='section-title', children=[
                         html.I(className="fas fa-building"),
@@ -1169,7 +1249,7 @@ def render_main_content(pumps_data, curve_data):
                     dcc.Input(id='particle-input', type='number', value=0, min=0, step=1, className='modern-input'),
                 ]),
                 
-                # Manual Input
+                # Manual Input - ENHANCED
                 html.Div(className='modern-card', children=[
                     html.H4(id='manual-title', className='section-title', children=[
                         html.I(className="fas fa-edit"),
@@ -1212,6 +1292,16 @@ def render_main_content(pumps_data, curve_data):
                     dcc.Input(id='head-value-input', type='number', value=0, min=0, step=1, className='modern-input'),
                 ]),
                 
+                # Estimated Application Section - NEW
+                html.Div(id='estimation-section', className='modern-card', children=[
+                    html.H4(id='estimation-title', className='section-title', children=[
+                        html.I(className="fas fa-calculator"),
+                        "Estimated Application"
+                    ]),
+                    html.P(children="Based on Manual Input", style={'color': '#6b7280', 'marginBottom': '16px'}),
+                    html.Div(id='estimation-display', className='estimation-card'),
+                ]),
+                
                 # Result percentage and search
                 html.Div(className='modern-card', children=[
                     html.Label(id='percentage-label', children="Show Top Percentage of Results", style={'fontWeight': '500', 'marginBottom': '16px', 'display': 'block'}),
@@ -1238,7 +1328,7 @@ def render_main_content(pumps_data, curve_data):
             
             # Content Area - Results and charts
             html.Div(className='content-area', children=[
-                # Results section
+                # Results section - ENHANCED
                 html.Div(id='results-section', children=[
                     html.H3(id='results-title', className='section-title', children=[
                         html.I(className="fas fa-list"),
@@ -1248,7 +1338,7 @@ def render_main_content(pumps_data, curve_data):
                     html.Div(id='results-table-container', className='data-table-container'),
                 ], style={'marginBottom': '32px'}),
                 
-                # Pump curves section
+                # Pump curves section - ENHANCED
                 html.Div(id='curves-section', children=[
                     html.H3(id='curves-title', className='section-title', children=[
                         html.I(className="fas fa-chart-line"),
@@ -1260,7 +1350,8 @@ def render_main_content(pumps_data, curve_data):
             ], style={'width': '65%', 'display': 'inline-block', 'verticalAlign': 'top'}),
         ], style={'display': 'flex', 'gap': '0', 'padding': '24px'}),
     ])
-    # --- All Callbacks ---
+
+# --- Enhanced Callbacks ---
 
 @app.callback(
     [Output('language-store', 'data'),
@@ -1270,6 +1361,11 @@ def render_main_content(pumps_data, curve_data):
      Output('category-label', 'children'),
      Output('frequency-label', 'children'),
      Output('phase-label', 'children'),
+     Output('column-selection-title', 'children'),
+     Output('column-selection-desc', 'children'),
+     Output('select-all-btn', 'children'),
+     Output('deselect-all-btn', 'children'),
+     Output('essential-columns-note', 'children'),
      Output('application-title', 'children'),
      Output('floor-faucet-info', 'children'),
      Output('floors-label', 'children'),
@@ -1286,6 +1382,7 @@ def render_main_content(pumps_data, curve_data):
      Output('flow-value-label', 'children'),
      Output('head-unit-label', 'children'),
      Output('head-value-label', 'children'),
+     Output('estimation-title', 'children'),
      Output('percentage-label', 'children'),
      Output('search-button', 'children'),
      Output('results-title', 'children'),
@@ -1311,6 +1408,16 @@ def update_language(selected_language):
         get_text("Pump Curves", lang)
     ]
     
+    column_selection_title_children = [
+        html.I(className="fas fa-columns"),
+        get_text("Column Selection", lang)
+    ]
+    
+    estimation_title_children = [
+        html.I(className="fas fa-calculator"),
+        get_text("Estimated Application", lang)
+    ]
+    
     return (
         lang,
         get_text("Hung Pump", lang),
@@ -1319,6 +1426,11 @@ def update_language(selected_language):
         get_text("Category", lang),
         get_text("Frequency", lang),
         get_text("Phase", lang),
+        column_selection_title_children,
+        get_text("Select Columns", lang),
+        get_text("Select All", lang),
+        get_text("Deselect All", lang),
+        get_text("Essential Columns", lang),
         [html.I(className="fas fa-building"), get_text("Application Input", lang)],
         get_text("Floor Faucet Info", lang),
         get_text("Number of Floors", lang),
@@ -1335,6 +1447,7 @@ def update_language(selected_language):
         get_text("Flow Value", lang),
         get_text("Head Unit", lang),
         get_text("TDH", lang),
+        estimation_title_children,
         get_text("Show Percentage", lang),
         search_children,
         results_title_children,
@@ -1418,6 +1531,72 @@ def update_phase_options(pumps_data, lang):
     
     return options, 'All'
 
+# NEW: Column Selection Callback
+@app.callback(
+    Output('column-checkboxes-container', 'children'),
+    [Input('pumps-data-store', 'data'),
+     Input('language-store', 'data')]
+)
+def update_column_checkboxes(pumps_data, lang):
+    """Create column selection checkboxes"""
+    if not pumps_data:
+        return []
+    
+    pumps_df = pd.DataFrame(pumps_data)
+    essential_columns = ["Model", "Model No."]
+    all_columns = [col for col in pumps_df.columns if col not in ["DB ID"]]
+    optional_columns = [col for col in all_columns if col not in essential_columns]
+    
+    checkboxes = []
+    for i, col in enumerate(optional_columns):
+        checkboxes.append(
+            html.Div([
+                dcc.Checklist(
+                    id={'type': 'column-checkbox', 'index': col},
+                    options=[{'label': col, 'value': col}],
+                    value=[],
+                    style={'margin': '4px 8px'}
+                )
+            ], style={'display': 'inline-block'})
+        )
+    
+    return checkboxes
+
+# NEW: Column Selection Management
+@app.callback(
+    Output('selected-columns-store', 'data'),
+    [Input('select-all-btn', 'n_clicks'),
+     Input('deselect-all-btn', 'n_clicks'),
+     Input({'type': 'column-checkbox', 'index': ALL}, 'value')],
+    [State('pumps-data-store', 'data'),
+     State('selected-columns-store', 'data')]
+)
+def manage_column_selection(select_all_clicks, deselect_all_clicks, checkbox_values, pumps_data, current_selection):
+    """Manage column selection state"""
+    if not pumps_data:
+        return []
+    
+    pumps_df = pd.DataFrame(pumps_data)
+    essential_columns = ["Model", "Model No."]
+    all_columns = [col for col in pumps_df.columns if col not in ["DB ID"]]
+    optional_columns = [col for col in all_columns if col not in essential_columns]
+    
+    triggered = ctx.triggered_id if ctx.triggered else None
+    
+    if triggered == 'select-all-btn':
+        return optional_columns
+    elif triggered == 'deselect-all-btn':
+        return []
+    elif triggered and 'type' in triggered and triggered['type'] == 'column-checkbox':
+        # Handle individual checkbox changes
+        selected = []
+        for i, values in enumerate(checkbox_values):
+            if values and i < len(optional_columns):
+                selected.extend(values)
+        return selected
+    
+    return current_selection or []
+
 @app.callback(
     [Output('application-section', 'style'),
      Output('flow-value-input', 'value'),
@@ -1459,6 +1638,42 @@ def update_calculations(category, floors, faucets, length, width, height, drain_
     
     return app_style, round(auto_flow_display, 2), round(auto_tdh_display, 2)
 
+# NEW: Estimation Display Callback
+@app.callback(
+    [Output('estimation-display', 'children'),
+     Output('estimation-store', 'data')],
+    [Input('flow-value-input', 'value'),
+     Input('head-value-input', 'value'),
+     Input('flow-unit-radio', 'value'),
+     Input('head-unit-radio', 'value'),
+     Input('language-store', 'data')]
+)
+def update_estimation_display(flow_value, head_value, flow_unit, head_unit, lang):
+    """Update estimation display based on manual input"""
+    if not flow_value or not head_value:
+        return [], {'floors': 0, 'faucets': 0}
+    
+    # Convert to base units
+    flow_lpm = convert_flow_to_lpm(flow_value, flow_unit)
+    head_m = convert_head_to_m(head_value, head_unit)
+    
+    # Calculate estimates
+    estimated_floors = round(head_m / 3.5) if head_m > 0 else 0
+    estimated_faucets = round(flow_lpm / 15) if flow_lpm > 0 else 0
+    
+    estimation_content = [
+        html.Div(className='estimation-metric', children=[
+            html.Span(get_text("Estimated Floors", lang), className='estimation-label'),
+            html.Span(str(estimated_floors), className='estimation-value')
+        ]),
+        html.Div(className='estimation-metric', children=[
+            html.Span(get_text("Estimated Faucets", lang), className='estimation-label'),
+            html.Span(str(estimated_faucets), className='estimation-value')
+        ])
+    ]
+    
+    return estimation_content, {'floors': estimated_floors, 'faucets': estimated_faucets}
+
 @app.callback(
     [Output('pond-volume-display', 'children'),
      Output('required-flow-display', 'children')],
@@ -1484,6 +1699,7 @@ def update_pond_calculations(length, width, height, drain_time, flow_unit, lang)
     
     return volume_text, flow_text
 
+# NEW: Reset Functionality
 @app.callback(
     [Output('floors-input', 'value'),
      Output('faucets-input', 'value'),
@@ -1501,9 +1717,10 @@ def update_pond_calculations(length, width, height, drain_time, flow_unit, lang)
 def reset_inputs(n_clicks):
     """Reset all input values"""
     if n_clicks:
-        return 0, 0, 0, 0, 0, 1, 0, 0, 'All Categories', 'All', 'All', 'L/min', 'm', 100
+        return 0, 0, 0, 0, 0, 1, 0, 0, 'L/min', 'm', 100
     return dash.no_update
 
+# ENHANCED: Search Callback with Column Selection
 @app.callback(
     [Output('filtered-pumps-store', 'data'),
      Output('user-operating-point-store', 'data'),
@@ -1520,11 +1737,12 @@ def reset_inputs(n_clicks):
      State('flow-unit-radio', 'value'),
      State('head-unit-radio', 'value'),
      State('percentage-slider', 'value'),
+     State('selected-columns-store', 'data'),
      State('language-store', 'data')]
 )
 def perform_search(n_clicks, pumps_data, category, frequency, phase, flow_value, head_value, particle_size, 
-                  flow_unit, head_unit, percentage, lang):
-    """Perform pump search based on criteria"""
+                  flow_unit, head_unit, percentage, selected_columns, lang):
+    """Perform pump search based on criteria with column selection"""
     if not n_clicks or not pumps_data:
         empty_msg = "Click 'Search Pumps' to find matching pumps."
         return [], {'flow': 0, 'head': 0}, empty_msg, html.Div()
@@ -1572,6 +1790,7 @@ def perform_search(n_clicks, pumps_data, category, frequency, phase, flow_value,
     
     # Apply percentage limit
     max_to_show = max(1, int(len(filtered_pumps) * (percentage / 100)))
+    total_results = len(filtered_pumps)
     filtered_pumps = filtered_pumps.head(max_to_show).reset_index(drop=True)
     
     # Add converted columns for display
@@ -1585,10 +1804,11 @@ def perform_search(n_clicks, pumps_data, category, frequency, phase, flow_value,
             lambda x: round(convert_head_from_m(x, head_unit), 2)
         )
     
-    # Prepare table columns
+    # Prepare table columns with user selection
     essential_columns = ["Model", "Model No."]
     columns_to_show = []
     
+    # Add essential columns
     for col in essential_columns:
         if col in filtered_pumps.columns:
             columns_to_show.append(col)
@@ -1599,11 +1819,14 @@ def perform_search(n_clicks, pumps_data, category, frequency, phase, flow_value,
     if f"Head Rated ({head_unit})" in filtered_pumps.columns:
         columns_to_show.append(f"Head Rated ({head_unit})")
     
-    # Add other important columns
-    other_cols = ["Category", "Frequency (Hz)", "Phase", "Max Head(M)", "Product Link"]
-    for col in other_cols:
+    # Add user-selected columns
+    for col in (selected_columns or []):
         if col in filtered_pumps.columns and col not in columns_to_show:
             columns_to_show.append(col)
+    
+    # Add Product Link column at the end if present
+    if "Product Link" in filtered_pumps.columns and "Product Link" not in columns_to_show:
+        columns_to_show.append("Product Link")
     
     # Create DataTable
     display_df = filtered_pumps[columns_to_show].copy()
@@ -1668,7 +1891,7 @@ def perform_search(n_clicks, pumps_data, category, frequency, phase, flow_value,
     
     results_info = html.Div(className='success-badge', children=[
         html.I(className="fas fa-check-circle", style={'marginRight': '8px'}),
-        get_text("Found Pumps", lang, count=len(filtered_pumps))
+        get_text("Showing Results", lang, count=len(filtered_pumps), total=total_results)
     ])
     
     return (filtered_pumps.to_dict('records'), 
@@ -1696,6 +1919,7 @@ def update_selected_pumps(selected_rows, filtered_pumps_data):
     
     return [selected_models]
 
+# ENHANCED: Pump Curves with Individual Charts
 @app.callback(
     [Output('curves-info', 'children'),
      Output('curves-container', 'children')],
@@ -1707,11 +1931,11 @@ def update_selected_pumps(selected_rows, filtered_pumps_data):
      State('language-store', 'data')]
 )
 def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, head_unit, lang):
-    """Update pump performance curves based on selected pumps"""
+    """Update pump performance curves based on selected pumps with individual charts"""
     if not selected_models or not selected_models[0] or not curve_data:
         return html.Div(className='info-badge', children=[
             html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
-            "Select pumps from the table above to view their performance curves."
+            get_text("Select Pumps", lang)
         ]), html.Div()
     
     curve_df = pd.DataFrame(curve_data)
@@ -1725,7 +1949,7 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
     if not available_models:
         return html.Div(className='warning-badge', children=[
             html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
-            "The selected pumps do not have curve data available."
+            get_text("No Curve Data", lang)
         ]), html.Div()
     
     charts = []
@@ -1749,7 +1973,7 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
         if fig_comp:
             charts.append(
                 html.Div(className='modern-card', children=[
-                    html.H4(f"Performance Comparison - {len(available_models)} Pumps", 
+                    html.H4(get_text("Multiple Curves", lang), 
                            style={'color': '#2c3e50', 'marginBottom': '8px'}),
                     html.P(f"Comparing: {', '.join(available_models)}", 
                           style={'color': '#6b7280', 'fontSize': '14px', 'marginBottom': '16px'}),
@@ -1766,7 +1990,7 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
                 if fig:
                     individual_charts.append(
                         html.Div(className='modern-card', style={'marginBottom': '20px'}, children=[
-                            html.H5(f"Performance Curve - {model}", 
+                            html.H5(get_text("Performance Curve", lang, model=model), 
                                    style={'color': '#2c3e50', 'marginBottom': '16px'}),
                             dcc.Graph(figure=fig, style={'height': '400px'})
                         ])
@@ -1775,7 +1999,7 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
             if individual_charts:
                 charts.append(
                     html.Details([
-                        html.Summary("View Individual Pump Curves", 
+                        html.Summary(get_text("View Individual", lang), 
                                    style={'fontWeight': 'bold', 'margin': '20px 0 10px 0', 
                                          'cursor': 'pointer', 'color': '#0066CC'}),
                         html.Div(individual_charts)
@@ -1784,10 +2008,89 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
     
     info_text = html.Div(className='success-badge', children=[
         html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
-        f"Displaying curves for {len(available_models)} pump(s)"
+        get_text("Selected Pumps", lang, count=len(available_models))
     ])
     
     return info_text, html.Div(charts)
+
+# --- Enhanced Update for All Column Checkboxes ---
+@app.callback(
+    [Output({'type': 'column-checkbox', 'index': ALL}, 'value')],
+    [Input('select-all-btn', 'n_clicks'),
+     Input('deselect-all-btn', 'n_clicks')],
+    [State('pumps-data-store', 'data')]
+)
+def update_all_checkboxes(select_all_clicks, deselect_all_clicks, pumps_data):
+    """Update all column checkboxes when select/deselect all is clicked"""
+    if not pumps_data:
+        return [[]]
+    
+    pumps_df = pd.DataFrame(pumps_data)
+    essential_columns = ["Model", "Model No."]
+    all_columns = [col for col in pumps_df.columns if col not in ["DB ID"]]
+    optional_columns = [col for col in all_columns if col not in essential_columns]
+    
+    triggered = ctx.triggered_id if ctx.triggered else None
+    
+    if triggered == 'select-all-btn':
+        return [[col] for col in optional_columns]
+    elif triggered == 'deselect-all-btn':
+        return [[] for _ in optional_columns]
+    
+    return [[] for _ in optional_columns]
+
+# --- Additional Translation Updates for Radio Items ---
+@app.callback(
+    [Output('flow-unit-radio', 'options'),
+     Output('head-unit-radio', 'options')],
+    [Input('language-store', 'data')]
+)
+def update_radio_options(lang):
+    """Update radio button options with translations"""
+    flow_unit_options = [
+        {'label': get_text('L/min', lang), 'value': 'L/min'},
+        {'label': get_text('L/sec', lang), 'value': 'L/sec'},
+        {'label': get_text('m³/hr', lang), 'value': 'm³/hr'},
+        {'label': get_text('m³/min', lang), 'value': 'm³/min'},
+        {'label': get_text('US gpm', lang), 'value': 'US gpm'}
+    ]
+    
+    head_unit_options = [
+        {'label': get_text('m', lang), 'value': 'm'},
+        {'label': get_text('ft', lang), 'value': 'ft'}
+    ]
+    
+    return flow_unit_options, head_unit_options
+
+# --- Enhanced Error Handling for Data Loading ---
+@app.callback(
+    Output('main-content-output', 'children', allow_duplicate=True),
+    [Input('pumps-data-store', 'data')],
+    [State('language-store', 'data')],
+    prevent_initial_call=True
+)
+def handle_data_loading_errors(pumps_data, lang):
+    """Handle data loading errors with proper user feedback"""
+    if not pumps_data:
+        return html.Div(
+            className='modern-card',
+            style={'textAlign': 'center', 'padding': '60px'},
+            children=[
+                html.I(className="fas fa-exclamation-triangle", 
+                      style={'fontSize': '48px', 'color': '#FFC107', 'marginBottom': '20px'}),
+                html.H3(get_text("No Data", lang), style={'color': '#2c3e50'}),
+                html.P("Please check your Supabase connection or ensure CSV files are available.", 
+                      style={'color': '#6b7280'}),
+                html.Button(
+                    "Try Again",
+                    id='retry-data-load',
+                    className='modern-button-primary',
+                    style={'marginTop': '20px'}
+                )
+            ]
+        )
+    
+    return dash.no_update
 
 # --- Run the App ---
 server = app.server
@@ -1798,8 +2101,8 @@ if __name__ == '__main__':
     
     # For Render deployment
     if os.getenv('RENDER'):
-        print(f"🚀 Starting app on Render (port {port})...")
+        print(f"🚀 Starting enhanced app on Render (port {port})...")
         app.run_server(debug=False, host='0.0.0.0', port=port)
     else:
-        print(f"🚀 Starting app locally (port {port})...")
+        print(f"🚀 Starting enhanced app locally (port {port})...")
         app.run_server(debug=True, host='0.0.0.0', port=port)

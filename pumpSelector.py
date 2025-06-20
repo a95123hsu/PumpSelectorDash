@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 import json
 import logging
+import traceback
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -351,7 +352,7 @@ def load_pump_data():
         supabase = init_connection()
         if not supabase:
             print("⚠️ No Supabase connection, trying CSV fallback...")
-            return load_csv_fallback("Pump Selection Data.csv")
+            return load_csv_fallback("pump_selection_data_rows 6.csv")
             
         print("🔄 Fetching pump data from Supabase...")
         all_records = []
@@ -382,12 +383,12 @@ def load_pump_data():
             return df
         else:
             print("⚠️ No pump data found in Supabase, trying CSV fallback...")
-            return load_csv_fallback("Pump Selection Data.csv")
+            return load_csv_fallback("pump_selection_data_rows 6.csv")
             
     except Exception as e:
         print(f"❌ Error loading pump data from Supabase: {str(e)}")
         print("⚠️ Trying CSV fallback...")
-        return load_csv_fallback("Pump Selection Data.csv")
+        return load_csv_fallback("pump_selection_data_rows 6.csv")
 
 def load_pump_curve_data():
     """Load pump curve data from Supabase with CSV fallback"""
@@ -397,7 +398,7 @@ def load_pump_curve_data():
         supabase = init_connection()
         if not supabase:
             print("⚠️ No Supabase connection, trying CSV fallback...")
-            return load_csv_fallback("pump_curve_data_rows 1.csv")
+            return load_csv_fallback("pump_curve_data_rows 3.csv")
             
         print("🔄 Fetching curve data from Supabase...")
         all_records = []
@@ -428,12 +429,12 @@ def load_pump_curve_data():
             return df
         else:
             print("⚠️ No curve data found in Supabase, trying CSV fallback...")
-            return load_csv_fallback("pump_curve_data_rows 1.csv")
+            return load_csv_fallback("pump_curve_data_rows 3.csv")
             
     except Exception as e:
         print(f"❌ Error loading curve data from Supabase: {str(e)}")
         print("⚠️ Trying CSV fallback...")
-        return load_csv_fallback("pump_curve_data_rows 1.csv")
+        return load_csv_fallback("pump_curve_data_rows 3.csv")
 
 def load_csv_fallback(filename):
     """Load data from CSV file as fallback"""
@@ -445,171 +446,350 @@ def load_csv_fallback(filename):
         print(f"❌ Error loading CSV {filename}: {str(e)}")
         return pd.DataFrame()
 
-# --- Enhanced Chart Creation Functions ---
-def create_pump_curve_chart(curve_data, model_no, user_flow=None, user_head=None, flow_unit="L/min", head_unit="m", lang="English"):
-    """Create performance curve chart for a single pump"""
-    head_columns = [col for col in curve_data.columns if col.endswith('M') and col not in ['Max Head(M)']]
-    fig = go.Figure()
+# --- FIXED Chart Creation Functions for Your Data Structure ---
+def clean_curve_data(curve_df):
+    """Clean and prepare curve data for your specific CSV structure"""
+    print("🧹 Cleaning curve data...")
     
-    pump_data = curve_data[curve_data['Model No.'] == model_no]
-    if pump_data.empty:
-        return None
+    # Create a copy to avoid modifying original
+    cleaned_df = curve_df.copy()
     
-    pump_row = pump_data.iloc[0]
-    flows, heads = [], []
+    # Clean Model No. column
+    if 'Model No.' in cleaned_df.columns:
+        cleaned_df['Model No.'] = cleaned_df['Model No.'].astype(str).str.strip()
+        print(f"✅ Cleaned {len(cleaned_df)} model numbers")
     
-    for col in head_columns:
-        try:
-            head_value = float(col.replace('M', ''))
-            flow_value = pd.to_numeric(pump_row[col], errors='coerce')
-            if not pd.isna(flow_value) and flow_value > 0:
-                flows.append(convert_flow_from_lpm(flow_value, flow_unit))
-                heads.append(convert_head_from_m(head_value, head_unit))
-        except:
-            continue
+    # Get all head columns (both M and Kg/cm² columns)
+    head_columns_m = [col for col in cleaned_df.columns if 
+                      (col.endswith('M') or col == '10.5') and 
+                      col not in ['Max Head(M)']]
     
-    if flows and heads:
-        sorted_data = sorted(zip(flows, heads))
-        flows, heads = zip(*sorted_data)
+    pressure_columns = [col for col in cleaned_df.columns if col.endswith('Kg/cm²')]
+    
+    print(f"📊 Found head columns: {head_columns_m}")
+    print(f"📊 Found pressure columns: {pressure_columns}")
+    
+    # Clean head columns - convert to numeric and handle mixed types
+    for col in head_columns_m:
+        # Convert to numeric, replacing non-numeric values with NaN
+        cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors='coerce')
+        # Replace negative values and zeros with NaN (invalid flow rates)
+        cleaned_df[col] = cleaned_df[col].where(cleaned_df[col] > 0)
         
-        fig.add_trace(go.Scatter(
-            x=flows, y=heads, mode='lines+markers',
-            name=f'{model_no} - Head Curve',
-            line=dict(color='#0066CC', width=4), 
-            marker=dict(size=10, color='#0066CC'),
-            hovertemplate=f'<b>Flow:</b> %{{x:.2f}} {flow_unit}<br><b>Head:</b> %{{y:.2f}} {head_unit}<extra></extra>'
-        ))
+        non_null_count = cleaned_df[col].notna().sum()
+        print(f"  {col}: {non_null_count} valid values")
     
-    if user_flow and user_head and user_flow > 0 and user_head > 0:
-        display_flow = convert_flow_from_lpm(user_flow, flow_unit)
-        display_head = convert_head_from_m(user_head, head_unit)
-        fig.add_trace(go.Scatter(
-            x=[display_flow], y=[display_head], mode='markers',
-            name=get_text("Operating Point", lang),
-            marker=dict(size=20, color='#FF4444', symbol='star'),
-            hovertemplate=f'<b>Operating Point</b><br>Flow: {display_flow:.2f} {flow_unit}<br>Head: {display_head:.2f} {head_unit}<extra></extra>'
-        ))
-    
-    fig.update_layout(
-        title=dict(
-            text=get_text("Performance Curve", lang, model=model_no),
-            font=dict(size=20, color='#2c3e50'),
-            x=0.5
-        ),
-        xaxis=dict(
-            title=get_text("Flow Rate", lang, unit=flow_unit),
-            gridcolor='#e1e5e9',
-            linecolor='#bdc3c7',
-            title_font=dict(size=16, color='#34495e'),
-            tickfont=dict(size=14, color='#34495e')
-        ),
-        yaxis=dict(
-            title=get_text("Head", lang, unit=head_unit),
-            gridcolor='#e1e5e9',
-            linecolor='#bdc3c7',
-            title_font=dict(size=16, color='#34495e'),
-            tickfont=dict(size=14, color='#34495e')
-        ),
-        plot_bgcolor='#f8f9fa',
-        paper_bgcolor='white',
-        hovermode='closest', 
-        showlegend=True,
-        legend=dict(
-            bgcolor='rgba(255,255,255,0.9)',
-            bordercolor='#bdc3c7',
-            borderwidth=1
-        ),
-        height=500,
-        margin=dict(l=60, r=30, t=60, b=60)
-    )
-    
-    return fig
+    return cleaned_df
 
-def create_comparison_chart(curve_data, model_nos, user_flow=None, user_head=None, flow_unit="L/min", head_unit="m", lang="English"):
-    """Create comparison chart for multiple pumps"""
-    fig = go.Figure()
-    colors = ['#0066CC', '#FF6B35', '#28A745', '#FFC107', '#6F42C1', '#FD7E14', '#E83E8C', '#20C997']
+def get_head_value_from_column(column_name):
+    """Extract head value from column name, handling your specific format"""
+    try:
+        if column_name == '10.5':
+            return 10.5
+        elif column_name.endswith('M'):
+            return float(column_name.replace('M', ''))
+        elif column_name.endswith('Kg/cm²'):
+            # Convert pressure to head (approximate: 1 Kg/cm² ≈ 10.2 meters)
+            pressure = float(column_name.replace('Kg/cm²', ''))
+            return pressure * 10.2
+        else:
+            return None
+    except:
+        return None
+
+def create_pump_curve_chart_fixed(curve_data, model_no, user_flow=None, user_head=None, 
+                                 flow_unit="L/min", head_unit="m", lang="English"):
+    """Create pump curve chart adapted for your data structure"""
+    print(f"\n🎨 Creating chart for model: {model_no}")
     
-    for i, model_no in enumerate(model_nos):
-        pump_data = curve_data[curve_data['Model No.'] == model_no]
+    try:
+        if not curve_data:
+            print("❌ No curve data provided")
+            return None
+        
+        curve_df = pd.DataFrame(curve_data)
+        cleaned_df = clean_curve_data(curve_df)
+        
+        # Find the pump data
+        pump_data = cleaned_df[cleaned_df['Model No.'] == model_no]
         if pump_data.empty:
-            continue
+            print(f"❌ No data found for model: {model_no}")
+            print(f"Available models sample: {cleaned_df['Model No.'].head().tolist()}")
+            return None
         
         pump_row = pump_data.iloc[0]
-        head_columns = [col for col in curve_data.columns if col.endswith('M') and col not in ['Max Head(M)']]
+        print(f"✅ Found pump data for: {model_no}")
+        
+        # Get head columns with the correct format for your data
+        head_columns = [col for col in cleaned_df.columns if 
+                       (col.endswith('M') or col == '10.5') and 
+                       col not in ['Max Head(M)']]
+        
+        print(f"📊 Processing head columns: {head_columns}")
+        
         flows, heads = [], []
         
         for col in head_columns:
             try:
-                head_value = float(col.replace('M', ''))
+                head_value = get_head_value_from_column(col)
+                if head_value is None:
+                    continue
+                
                 flow_value = pd.to_numeric(pump_row[col], errors='coerce')
+                
+                print(f"  {col}: Head={head_value}, Flow={flow_value}")
+                
                 if not pd.isna(flow_value) and flow_value > 0:
-                    flows.append(convert_flow_from_lpm(flow_value, flow_unit))
-                    heads.append(convert_head_from_m(head_value, head_unit))
-            except:
+                    # Convert from LPM and M to user's units
+                    converted_flow = convert_flow_from_lpm(flow_value, flow_unit)
+                    converted_head = convert_head_from_m(head_value, head_unit)
+                    flows.append(converted_flow)
+                    heads.append(converted_head)
+                    print(f"    ✅ Added point: Flow={converted_flow:.2f} {flow_unit}, Head={converted_head:.2f} {head_unit}")
+                else:
+                    print(f"    ❌ Invalid flow value: {flow_value}")
+                    
+            except Exception as e:
+                print(f"    ❌ Error processing {col}: {str(e)}")
                 continue
         
-        if flows and heads:
-            sorted_data = sorted(zip(flows, heads))
-            flows, heads = zip(*sorted_data)
-            fig.add_trace(go.Scatter(
-                x=flows, y=heads, mode='lines+markers',
-                name=model_no,
-                line=dict(color=colors[i % len(colors)], width=3),
-                marker=dict(size=8, color=colors[i % len(colors)]),
-                hovertemplate=f'<b>{model_no}</b><br>Flow: %{{x:.2f}} {flow_unit}<br>Head: %{{y:.2f}} {head_unit}<extra></extra>'
-            ))
-    
-    if user_flow and user_head and user_flow > 0 and user_head > 0:
-        display_flow = convert_flow_from_lpm(user_flow, flow_unit)
-        display_head = convert_head_from_m(user_head, head_unit)
+        print(f"✅ Valid curve points collected: {len(flows)}")
+        
+        if not flows or len(flows) < 2:
+            print("❌ Insufficient valid data points for curve")
+            return None
+        
+        # Create the chart
+        fig = go.Figure()
+        
+        # Sort the data points by flow (ascending)
+        sorted_data = sorted(zip(flows, heads))
+        flows, heads = zip(*sorted_data)
+        
+        print(f"📈 Creating curve with {len(flows)} points")
+        
+        # Add pump curve
         fig.add_trace(go.Scatter(
-            x=[display_flow], y=[display_head], mode='markers',
-            name=get_text("Operating Point", lang),
-            marker=dict(size=20, color='#FF4444', symbol='star'),
-            hovertemplate=f'<b>Operating Point</b><br>Flow: {display_flow:.2f} {flow_unit}<br>Head: {display_head:.2f} {head_unit}<extra></extra>'
+            x=flows, 
+            y=heads, 
+            mode='lines+markers',
+            name=f'{model_no} - Performance Curve',
+            line=dict(color='#0066CC', width=4), 
+            marker=dict(size=8, color='#0066CC'),
+            hovertemplate=(
+                f'<b>{model_no}</b><br>'
+                f'Flow: %{{x:.2f}} {flow_unit}<br>'
+                f'Head: %{{y:.2f}} {head_unit}<br>'
+                '<extra></extra>'
+            )
         ))
+        
+        # Add operating point if provided
+        if user_flow and user_head and user_flow > 0 and user_head > 0:
+            display_flow = convert_flow_from_lpm(user_flow, flow_unit)
+            display_head = convert_head_from_m(user_head, head_unit)
+            
+            print(f"🎯 Adding operating point: Flow={display_flow:.2f}, Head={display_head:.2f}")
+            
+            fig.add_trace(go.Scatter(
+                x=[display_flow], 
+                y=[display_head], 
+                mode='markers',
+                name=get_text("Operating Point", lang),
+                marker=dict(size=20, color='#FF4444', symbol='star'),
+                hovertemplate=(
+                    f'<b>Your Operating Point</b><br>'
+                    f'Flow: {display_flow:.2f} {flow_unit}<br>'
+                    f'Head: {display_head:.2f} {head_unit}<br>'
+                    '<extra></extra>'
+                )
+            ))
+        
+        # Update layout
+        fig.update_layout(
+            title=dict(
+                text=f"Performance Curve - {model_no}",
+                font=dict(size=20, color='#2c3e50'),
+                x=0.5
+            ),
+            xaxis=dict(
+                title=f"Flow Rate ({flow_unit})",
+                gridcolor='#e1e5e9',
+                linecolor='#bdc3c7',
+                title_font=dict(size=16, color='#34495e'),
+                tickfont=dict(size=14, color='#34495e'),
+                range=[0, max(flows) * 1.1] if flows else [0, 100]
+            ),
+            yaxis=dict(
+                title=f"Head ({head_unit})",
+                gridcolor='#e1e5e9',
+                linecolor='#bdc3c7',
+                title_font=dict(size=16, color='#34495e'),
+                tickfont=dict(size=14, color='#34495e'),
+                range=[0, max(heads) * 1.1] if heads else [0, 50]
+            ),
+            plot_bgcolor='#f8f9fa',
+            paper_bgcolor='white',
+            hovermode='closest', 
+            showlegend=True,
+            legend=dict(
+                bgcolor='rgba(255,255,255,0.9)',
+                bordercolor='#bdc3c7',
+                borderwidth=1,
+                x=0.02,
+                y=0.98
+            ),
+            height=500,
+            margin=dict(l=60, r=30, t=60, b=60)
+        )
+        
+        print("✅ Chart created successfully")
+        return fig
+        
+    except Exception as e:
+        print(f"❌ Error creating chart for {model_no}: {str(e)}")
+        print(f"Full traceback: {traceback.format_exc()}")
+        return None
+
+def create_comparison_chart_fixed(curve_data, model_nos, user_flow=None, user_head=None, 
+                                 flow_unit="L/min", head_unit="m", lang="English"):
+    """Create comparison chart for multiple pumps - fixed for your data"""
+    print(f"\n📊 Creating comparison chart for: {model_nos}")
     
-    fig.update_layout(
-        title=dict(
-            text=get_text("Multiple Curves", lang),
-            font=dict(size=20, color='#2c3e50'),
-            x=0.5
-        ),
-        xaxis=dict(
-            title=get_text("Flow Rate", lang, unit=flow_unit),
-            gridcolor='#e1e5e9',
-            linecolor='#bdc3c7',
-            title_font=dict(size=16, color='#34495e'),
-            tickfont=dict(size=14, color='#34495e')
-        ),
-        yaxis=dict(
-            title=get_text("Head", lang, unit=head_unit),
-            gridcolor='#e1e5e9',
-            linecolor='#bdc3c7',
-            title_font=dict(size=16, color='#34495e'),
-            tickfont=dict(size=14, color='#34495e')
-        ),
-        plot_bgcolor='#f8f9fa',
-        paper_bgcolor='white',
-        hovermode='closest', 
-        showlegend=True,
-        legend=dict(
-            bgcolor='rgba(255,255,255,0.9)',
-            bordercolor='#bdc3c7',
-            borderwidth=1
-        ),
-        height=500,
-        margin=dict(l=60, r=30, t=60, b=60)
-    )
-    
-    return fig
+    try:
+        curve_df = pd.DataFrame(curve_data)
+        cleaned_df = clean_curve_data(curve_df)
+        
+        fig = go.Figure()
+        colors = ['#0066CC', '#FF6B35', '#28A745', '#FFC107', '#6F42C1', '#FD7E14', '#E83E8C', '#20C997']
+        
+        curves_added = 0
+        
+        for i, model_no in enumerate(model_nos):
+            pump_data = cleaned_df[cleaned_df['Model No.'] == model_no]
+            if pump_data.empty:
+                print(f"❌ No data found for {model_no}")
+                continue
+            
+            pump_row = pump_data.iloc[0]
+            
+            # Get head columns
+            head_columns = [col for col in cleaned_df.columns if 
+                           (col.endswith('M') or col == '10.5') and 
+                           col not in ['Max Head(M)']]
+            
+            flows, heads = [], []
+            
+            for col in head_columns:
+                try:
+                    head_value = get_head_value_from_column(col)
+                    if head_value is None:
+                        continue
+                    
+                    flow_value = pd.to_numeric(pump_row[col], errors='coerce')
+                    
+                    if not pd.isna(flow_value) and flow_value > 0:
+                        converted_flow = convert_flow_from_lpm(flow_value, flow_unit)
+                        converted_head = convert_head_from_m(head_value, head_unit)
+                        flows.append(converted_flow)
+                        heads.append(converted_head)
+                        
+                except Exception as e:
+                    continue
+            
+            if flows and len(flows) >= 2:
+                # Sort the data points
+                sorted_data = sorted(zip(flows, heads))
+                flows, heads = zip(*sorted_data)
+                
+                fig.add_trace(go.Scatter(
+                    x=flows, 
+                    y=heads, 
+                    mode='lines+markers',
+                    name=model_no,
+                    line=dict(color=colors[i % len(colors)], width=3),
+                    marker=dict(size=6, color=colors[i % len(colors)]),
+                    hovertemplate=(
+                        f'<b>{model_no}</b><br>'
+                        f'Flow: %{{x:.2f}} {flow_unit}<br>'
+                        f'Head: %{{y:.2f}} {head_unit}<br>'
+                        '<extra></extra>'
+                    )
+                ))
+                curves_added += 1
+                print(f"✅ Added curve for {model_no} with {len(flows)} points")
+            else:
+                print(f"❌ Insufficient data for {model_no}")
+        
+        if curves_added == 0:
+            print("❌ No valid curves to display")
+            return None
+        
+        # Add operating point if provided
+        if user_flow and user_head and user_flow > 0 and user_head > 0:
+            display_flow = convert_flow_from_lpm(user_flow, flow_unit)
+            display_head = convert_head_from_m(user_head, head_unit)
+            
+            fig.add_trace(go.Scatter(
+                x=[display_flow], 
+                y=[display_head], 
+                mode='markers',
+                name=get_text("Operating Point", lang),
+                marker=dict(size=20, color='#FF4444', symbol='star'),
+                hovertemplate=(
+                    f'<b>Your Operating Point</b><br>'
+                    f'Flow: {display_flow:.2f} {flow_unit}<br>'
+                    f'Head: {display_head:.2f} {head_unit}<br>'
+                    '<extra></extra>'
+                )
+            ))
+        
+        # Update layout
+        fig.update_layout(
+            title=dict(
+                text=get_text("Multiple Curves", lang),
+                font=dict(size=20, color='#2c3e50'),
+                x=0.5
+            ),
+            xaxis=dict(
+                title=f"Flow Rate ({flow_unit})",
+                gridcolor='#e1e5e9',
+                linecolor='#bdc3c7',
+                title_font=dict(size=16, color='#34495e'),
+                tickfont=dict(size=14, color='#34495e')
+            ),
+            yaxis=dict(
+                title=f"Head ({head_unit})",
+                gridcolor='#e1e5e9',
+                linecolor='#bdc3c7',
+                title_font=dict(size=16, color='#34495e'),
+                tickfont=dict(size=14, color='#34495e')
+            ),
+            plot_bgcolor='#f8f9fa',
+            paper_bgcolor='white',
+            hovermode='closest', 
+            showlegend=True,
+            legend=dict(
+                bgcolor='rgba(255,255,255,0.9)',
+                bordercolor='#bdc3c7',
+                borderwidth=1
+            ),
+            height=500,
+            margin=dict(l=60, r=30, t=60, b=60)
+        )
+        
+        print(f"✅ Comparison chart created with {curves_added} curves")
+        return fig
+        
+    except Exception as e:
+        print(f"❌ Error creating comparison chart: {str(e)}")
+        return None
 
 # --- Initialize Dash App ---
 app = dash.Dash(__name__)
 app.title = "Hung Pump - Professional Pump Selection Tool"
 
-# Enhanced CSS styling (keeping your existing styles and adding new features)
+# Enhanced CSS styling
 app.index_string = '''
 <!DOCTYPE html>
 <html>
@@ -623,7 +803,6 @@ app.index_string = '''
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <style>
-            /* Your existing CSS styles here */
             :root {
                 --primary-color: #0066CC;
                 --secondary-color: #4A90E2;
@@ -817,43 +996,6 @@ app.index_string = '''
                 margin-bottom: 16px !important;
             }
             
-            /* Column selection styles */
-            .column-selection-card {
-                background: #f8f9fa !important;
-                border: 1px solid var(--border-color) !important;
-                border-radius: var(--border-radius) !important;
-                padding: 16px !important;
-                margin-bottom: 16px !important;
-            }
-            
-            .column-checkbox-container {
-                display: flex !important;
-                flex-wrap: wrap !important;
-                gap: 12px !important;
-                margin-top: 12px !important;
-            }
-            
-            .column-checkbox {
-                background: white !important;
-                border: 1px solid var(--border-color) !important;
-                border-radius: 6px !important;
-                padding: 8px 12px !important;
-                cursor: pointer !important;
-                transition: all 0.2s ease !important;
-                font-size: 14px !important;
-            }
-            
-            .column-checkbox.selected {
-                background: var(--primary-color) !important;
-                color: white !important;
-                border-color: var(--primary-color) !important;
-            }
-            
-            .column-checkbox:hover {
-                border-color: var(--primary-color) !important;
-            }
-            
-            /* Estimated application styles */
             .estimation-card {
                 background: linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%) !important;
                 border-left: 4px solid var(--primary-color) !important;
@@ -885,7 +1027,6 @@ app.index_string = '''
                 font-size: 18px !important;
             }
             
-            /* Enhanced table styles */
             .data-table-container {
                 border-radius: var(--border-radius) !important;
                 overflow: hidden !important;
@@ -919,14 +1060,12 @@ app.index_string = '''
                 background: rgba(0, 102, 204, 0.05) !important;
             }
             
-            /* Enhanced checkbox styles */
             input[type="checkbox"] {
                 transform: scale(1.2) !important;
                 accent-color: var(--primary-color) !important;
                 margin-right: 8px !important;
             }
             
-            /* Radio button styles */
             .radio-group label {
                 margin-right: 20px !important;
                 font-weight: 500 !important;
@@ -941,7 +1080,6 @@ app.index_string = '''
                 accent-color: var(--primary-color) !important;
             }
             
-            /* Slider styles */
             .slider-container .rc-slider {
                 margin: 16px 0 !important;
             }
@@ -960,7 +1098,6 @@ app.index_string = '''
                 box-shadow: var(--shadow-md) !important;
             }
             
-            /* Loading states */
             .loading-spinner {
                 display: inline-block !important;
                 width: 20px !important;
@@ -975,7 +1112,6 @@ app.index_string = '''
                 to { transform: rotate(360deg); }
             }
             
-            /* Responsive design */
             @media (max-width: 768px) {
                 .main-container {
                     margin: 10px !important;
@@ -1009,15 +1145,15 @@ app.layout = html.Div([
     # Data loading trigger
     dcc.Interval(id="load-trigger", interval=500, max_intervals=1),
     
-    # Store components for state management (enhanced)
+    # Store components for state management
     dcc.Store(id='language-store', data='English'),
     dcc.Store(id='pumps-data-store', data=[]),
     dcc.Store(id='curve-data-store', data=[]),
     dcc.Store(id='filtered-pumps-store', data=[]),
     dcc.Store(id='selected-pumps-store', data=[]),
     dcc.Store(id='user-operating-point-store', data={'flow': 0, 'head': 0}),
-    dcc.Store(id='selected-columns-store', data=[]),  # NEW
-    dcc.Store(id='estimation-store', data={'floors': 0, 'faucets': 0}),  # NEW
+    dcc.Store(id='selected-columns-store', data=[]),
+    dcc.Store(id='estimation-store', data={'floors': 0, 'faucets': 0}),
     
     # Main Container
     html.Div(className='main-container', children=[
@@ -1025,12 +1161,20 @@ app.layout = html.Div([
         html.Div(className='modern-card header-card', children=[
             html.Div([
                 html.Div(className='logo-container', children=[
-                    html.Img(src="https://www.hungpump.com/images/340357"),
+                    html.Img(src="https://www.hungpump.com/images/340357",
+                           style={'height': '60px', 'marginRight': '20px'}),
                 ]),
                 
                 html.Div([
-                    html.H1(id='app-title', className='app-title', children="Hung Pump"),
-                    html.P(id='main-title', className='app-subtitle', children="Professional Pump Selection Tool"),
+                    html.H1(id='app-title', className='app-title', 
+                           children="Hung Pump",
+                           style={'fontSize': '36px', 'fontWeight': '700', 'margin': '0',
+                                  'background': 'linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)',
+                                  'webkitBackgroundClip': 'text',
+                                  'webkitTextFillColor': 'transparent'}),
+                    html.P(id='main-title', className='app-subtitle', 
+                          children="Professional Pump Selection Tool",
+                          style={'fontSize': '18px', 'margin': '4px 0 0 0', 'opacity': '0.9'}),
                 ], style={'flex': '1'}),
                 
                 html.Div([
@@ -1043,6 +1187,7 @@ app.layout = html.Div([
                         ],
                         value='English',
                         clearable=False,
+                        style={'minWidth': '160px', 'backgroundColor': 'rgba(255,255,255,0.2)'}
                     )
                 ], style={'display': 'flex', 'alignItems': 'center'}),
             ], style={
@@ -1115,7 +1260,7 @@ def update_status_bar(pumps_data, curve_data, lang):
     if not pumps_data:
         return [
             html.Div(className='status-indicator', children=[
-                html.I(className="fas fa-spinner fa-spin"),
+                html.I(className="fas fa-spinner fa-spin", style={'marginRight': '8px'}),
                 html.Span("📊 Loading pump data...")
             ])
         ]
@@ -1126,11 +1271,11 @@ def update_status_bar(pumps_data, curve_data, lang):
     
     return [
         html.Div(className='status-indicator', children=[
-            html.I(className="fas fa-database"),
+            html.I(className="fas fa-database", style={'color': '#28A745', 'marginRight': '8px'}),
             html.Span(get_text("Data loaded", lang, n_records=pumps_count, timestamp=timestamp))
         ]),
         html.Div(className='status-indicator', children=[
-            html.I(className="fas fa-chart-line"),
+            html.I(className="fas fa-chart-line", style={'color': '#0066CC', 'marginRight': '8px'}),
             html.Span(get_text("Curve Data Loaded", lang, count=curve_count))
         ], style={'marginLeft': '24px'}),
     ]
@@ -1147,9 +1292,11 @@ def render_main_content(pumps_data, curve_data):
             className='modern-card',
             style={'textAlign': 'center', 'padding': '60px'},
             children=[
-                html.I(className="fas fa-spinner fa-spin", style={'fontSize': '48px', 'color': '#0066CC', 'marginBottom': '20px'}),
+                html.I(className="fas fa-spinner fa-spin", 
+                      style={'fontSize': '48px', 'color': '#0066CC', 'marginBottom': '20px'}),
                 html.H3("Loading Pump Data...", style={'color': '#2c3e50'}),
-                html.P("Please wait while we fetch the latest pump information from our database.", style={'color': '#6b7280'})
+                html.P("Please wait while we fetch the latest pump information from our database.", 
+                      style={'color': '#6b7280'})
             ]
         )
     
@@ -1165,50 +1312,60 @@ def render_main_content(pumps_data, curve_data):
                         "Step 1: Select Basic Criteria"
                     ]),
                     
-                    html.Label(id='category-label', children="Category:", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
+                    html.Label(id='category-label', children="Category:", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
                     dcc.Dropdown(id='category-dropdown', placeholder="Select...", className='modern-input'),
                     
-                    html.Label(id='frequency-label', children="Frequency (Hz):", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
+                    html.Label(id='frequency-label', children="Frequency (Hz):", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
                     dcc.Dropdown(id='frequency-dropdown', placeholder="Select...", className='modern-input'),
                     
-                    html.Label(id='phase-label', children="Phase:", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
+                    html.Label(id='phase-label', children="Phase:", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
                     dcc.Dropdown(id='phase-dropdown', placeholder="Select...", className='modern-input'),
                 ]),
                 
-                # Column Selection Section - NEW
+                # Column Selection Section
                 html.Div(id='column-selection-section', className='modern-card', children=[
                     html.H4(id='column-selection-title', className='section-title', children=[
                         html.I(className="fas fa-columns"),
                         "Column Selection"
                     ]),
-                    html.P(id='column-selection-desc', children="Select columns to display in results:", 
-                           style={'color': '#6b7280', 'marginBottom': '16px'}),
+                    html.P(id='column-selection-desc', 
+                          children="Select columns to display in results:", 
+                          style={'color': '#6b7280', 'marginBottom': '16px'}),
                     
                     html.Div([
-                        html.Button(id='select-all-btn', children="Select All", className='modern-button-secondary', 
+                        html.Button(id='select-all-btn', children="Select All", 
+                                   className='modern-button-secondary', 
                                    style={'marginRight': '8px', 'fontSize': '12px', 'padding': '6px 12px'}),
-                        html.Button(id='deselect-all-btn', children="Deselect All", className='modern-button-secondary',
+                        html.Button(id='deselect-all-btn', children="Deselect All", 
+                                   className='modern-button-secondary',
                                    style={'fontSize': '12px', 'padding': '6px 12px'}),
                     ], style={'marginBottom': '12px'}),
                     
                     html.Div(id='column-checkboxes-container', children=[]),
                     
-                    html.Small(id='essential-columns-note', children="Essential columns (Model, Model No.) are always shown",
+                    html.Small(id='essential-columns-note', 
+                              children="Essential columns (Model, Model No.) are always shown",
                               style={'color': '#6b7280', 'fontStyle': 'italic'})
                 ]),
                 
-                # Application Input (for Booster category) - ENHANCED
+                # Application Input (for Booster category)
                 html.Div(id='application-section', className='modern-card', children=[
                     html.H4(id='application-title', className='section-title', children=[
                         html.I(className="fas fa-building"),
                         "Application Input"
                     ]),
-                    html.Div(id='floor-faucet-info', className='info-badge', children="💡 Each floor = 3.5 m TDH | Each faucet = 15 LPM"),
+                    html.Div(id='floor-faucet-info', className='info-badge', 
+                            children="💡 Each floor = 3.5 m TDH | Each faucet = 15 LPM"),
                     
-                    html.Label(id='floors-label', children="Number of Floors", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
+                    html.Label(id='floors-label', children="Number of Floors", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
                     dcc.Input(id='floors-input', type='number', value=0, min=0, className='modern-input'),
                     
-                    html.Label(id='faucets-label', children="Number of Faucets", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
+                    html.Label(id='faucets-label', children="Number of Faucets", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
                     dcc.Input(id='faucets-input', type='number', value=0, min=0, className='modern-input'),
                 ], style={'display': 'none'}),
                 
@@ -1219,16 +1376,20 @@ def render_main_content(pumps_data, curve_data):
                         "Pond Drainage"
                     ]),
                     
-                    html.Label(id='length-label', children="Pond Length (m)", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
+                    html.Label(id='length-label', children="Pond Length (m)", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
                     dcc.Input(id='length-input', type='number', value=0, min=0, step=0.1, className='modern-input'),
                     
-                    html.Label(id='width-label', children="Pond Width (m)", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
+                    html.Label(id='width-label', children="Pond Width (m)", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
                     dcc.Input(id='width-input', type='number', value=0, min=0, step=0.1, className='modern-input'),
                     
-                    html.Label(id='height-label', children="Pond Height (m)", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
+                    html.Label(id='height-label', children="Pond Height (m)", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
                     dcc.Input(id='height-input', type='number', value=0, min=0, step=0.1, className='modern-input'),
                     
-                    html.Label(id='drain-time-label', children="Drain Time (hours)", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
+                    html.Label(id='drain-time-label', children="Drain Time (hours)", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
                     dcc.Input(id='drain-time-input', type='number', value=1, min=0.01, step=0.1, className='modern-input'),
                     
                     html.Div(id='pond-volume-display', className='success-badge', style={'margin': '16px 0 8px 0'}),
@@ -1242,21 +1403,24 @@ def render_main_content(pumps_data, curve_data):
                         "Additional Parameters"
                     ]),
                     
-                    html.Label(id='depth-label', children="Pump Depth Below Ground (m)", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
+                    html.Label(id='depth-label', children="Pump Depth Below Ground (m)", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
                     dcc.Input(id='depth-input', type='number', value=0, min=0, step=0.1, className='modern-input'),
                     
-                    html.Label(id='particle-label', children="Max Particle Size (mm)", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
+                    html.Label(id='particle-label', children="Max Particle Size (mm)", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block', 'marginTop': '16px'}),
                     dcc.Input(id='particle-input', type='number', value=0, min=0, step=1, className='modern-input'),
                 ]),
                 
-                # Manual Input - ENHANCED
+                # Manual Input
                 html.Div(className='modern-card', children=[
                     html.H4(id='manual-title', className='section-title', children=[
                         html.I(className="fas fa-edit"),
                         "Manual Input"
                     ]),
                     
-                    html.Label(id='flow-unit-label', children="Flow Unit", style={'fontWeight': '500', 'marginBottom': '12px', 'display': 'block'}),
+                    html.Label(id='flow-unit-label', children="Flow Unit", 
+                              style={'fontWeight': '500', 'marginBottom': '12px', 'display': 'block'}),
                     dcc.RadioItems(
                         id='flow-unit-radio',
                         className='radio-group',
@@ -1272,10 +1436,12 @@ def render_main_content(pumps_data, curve_data):
                         style={'marginBottom': '16px'}
                     ),
                     
-                    html.Label(id='flow-value-label', children="Flow Value", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
+                    html.Label(id='flow-value-label', children="Flow Value", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
                     dcc.Input(id='flow-value-input', type='number', value=0, min=0, step=10, className='modern-input'),
                     
-                    html.Label(id='head-unit-label', children="Head Unit", style={'fontWeight': '500', 'marginBottom': '12px', 'display': 'block', 'marginTop': '16px'}),
+                    html.Label(id='head-unit-label', children="Head Unit", 
+                              style={'fontWeight': '500', 'marginBottom': '12px', 'display': 'block', 'marginTop': '16px'}),
                     dcc.RadioItems(
                         id='head-unit-radio',
                         className='radio-group',
@@ -1288,11 +1454,12 @@ def render_main_content(pumps_data, curve_data):
                         style={'marginBottom': '16px'}
                     ),
                     
-                    html.Label(id='head-value-label', children="Total Dynamic Head (TDH)", style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
+                    html.Label(id='head-value-label', children="Total Dynamic Head (TDH)", 
+                              style={'fontWeight': '500', 'marginBottom': '8px', 'display': 'block'}),
                     dcc.Input(id='head-value-input', type='number', value=0, min=0, step=1, className='modern-input'),
                 ]),
                 
-                # Estimated Application Section - NEW
+                # Estimated Application Section
                 html.Div(id='estimation-section', className='modern-card', children=[
                     html.H4(id='estimation-title', className='section-title', children=[
                         html.I(className="fas fa-calculator"),
@@ -1304,7 +1471,8 @@ def render_main_content(pumps_data, curve_data):
                 
                 # Result percentage and search
                 html.Div(className='modern-card', children=[
-                    html.Label(id='percentage-label', children="Show Top Percentage of Results", style={'fontWeight': '500', 'marginBottom': '16px', 'display': 'block'}),
+                    html.Label(id='percentage-label', children="Show Top Percentage of Results", 
+                              style={'fontWeight': '500', 'marginBottom': '16px', 'display': 'block'}),
                     html.Div(className='slider-container', children=[
                         dcc.Slider(
                             id='percentage-slider',
@@ -1328,23 +1496,25 @@ def render_main_content(pumps_data, curve_data):
             
             # Content Area - Results and charts
             html.Div(className='content-area', children=[
-                # Results section - ENHANCED
+                # Results section
                 html.Div(id='results-section', children=[
                     html.H3(id='results-title', className='section-title', children=[
                         html.I(className="fas fa-list"),
                         "Search Results"
                     ]),
-                    html.Div(id='results-info', className='info-badge', children="Run a search to see results."),
+                    html.Div(id='results-info', className='info-badge', 
+                            children="Run a search to see results."),
                     html.Div(id='results-table-container', className='data-table-container'),
                 ], style={'marginBottom': '32px'}),
                 
-                # Pump curves section - ENHANCED
+                # Pump curves section
                 html.Div(id='curves-section', children=[
                     html.H3(id='curves-title', className='section-title', children=[
                         html.I(className="fas fa-chart-line"),
                         "Pump Performance Curves"
                     ]),
-                    html.Div(id='curves-info', className='info-badge', children="Select pumps from the table above to view their performance curves."),
+                    html.Div(id='curves-info', className='info-badge', 
+                            children="Select pumps from the table above to view their performance curves."),
                     html.Div(id='curves-container'),
                 ]),
             ], style={'width': '65%', 'display': 'inline-block', 'verticalAlign': 'top'}),
@@ -1531,7 +1701,7 @@ def update_phase_options(pumps_data, lang):
     
     return options, 'All'
 
-# NEW: Column Selection Callback
+# Column Selection Callback
 @app.callback(
     Output('column-checkboxes-container', 'children'),
     [Input('pumps-data-store', 'data'),
@@ -1562,7 +1732,7 @@ def update_column_checkboxes(pumps_data, lang):
     
     return checkboxes
 
-# NEW: Column Selection Management
+# Column Selection Management
 @app.callback(
     Output('selected-columns-store', 'data'),
     [Input('select-all-btn', 'n_clicks'),
@@ -1638,7 +1808,7 @@ def update_calculations(category, floors, faucets, length, width, height, drain_
     
     return app_style, round(auto_flow_display, 2), round(auto_tdh_display, 2)
 
-# NEW: Estimation Display Callback
+# Estimation Display Callback
 @app.callback(
     [Output('estimation-display', 'children'),
      Output('estimation-store', 'data')],
@@ -1699,7 +1869,7 @@ def update_pond_calculations(length, width, height, drain_time, flow_unit, lang)
     
     return volume_text, flow_text
 
-# NEW: Reset Functionality
+# Reset Functionality
 @app.callback(
     [Output('floors-input', 'value'),
      Output('faucets-input', 'value'),
@@ -1720,7 +1890,7 @@ def reset_inputs(n_clicks):
         return 0, 0, 0, 0, 0, 1, 0, 0, 'L/min', 'm', 100
     return dash.no_update
 
-# ENHANCED: Search Callback with Column Selection
+# Search Callback with Column Selection
 @app.callback(
     [Output('filtered-pumps-store', 'data'),
      Output('user-operating-point-store', 'data'),
@@ -1919,7 +2089,7 @@ def update_selected_pumps(selected_rows, filtered_pumps_data):
     
     return [selected_models]
 
-# ENHANCED: Pump Curves with Individual Charts
+# ENHANCED: Pump Curves with Fixed Chart Functions
 @app.callback(
     [Output('curves-info', 'children'),
      Output('curves-container', 'children')],
@@ -1931,7 +2101,9 @@ def update_selected_pumps(selected_rows, filtered_pumps_data):
      State('language-store', 'data')]
 )
 def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, head_unit, lang):
-    """Update pump performance curves based on selected pumps with individual charts"""
+    """Update pump performance curves based on selected pumps with fixed chart functions"""
+    print(f"\n🔄 Updating pump curves for: {selected_models}")
+    
     if not selected_models or not selected_models[0] or not curve_data:
         return html.Div(className='info-badge', children=[
             html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
@@ -1943,10 +2115,23 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
     user_flow = operating_point.get('flow', 0)
     user_head = operating_point.get('head', 0)
     
+    print(f"📊 Available curve data shape: {curve_df.shape}")
+    print(f"📋 Looking for models: {models}")
+    print(f"🎯 User operating point: Flow={user_flow} LPM, Head={user_head} M")
+    
     # Filter available models that have curve data
-    available_models = [model for model in models if model in curve_df["Model No."].values]
+    if 'Model No.' in curve_df.columns:
+        available_models = [model for model in models if model in curve_df["Model No."].values]
+        print(f"✅ Found models with curve data: {available_models}")
+    else:
+        print("❌ No 'Model No.' column found in curve data")
+        return html.Div(className='warning-badge', children=[
+            html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+            "Curve data structure issue"
+        ]), html.Div()
     
     if not available_models:
+        print("❌ No available models found with curve data")
         return html.Div(className='warning-badge', children=[
             html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
             get_text("No Curve Data", lang)
@@ -1955,9 +2140,10 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
     charts = []
     
     if len(available_models) == 1:
+        print(f"📈 Creating single pump curve for: {available_models[0]}")
         # Single pump curve
-        fig = create_pump_curve_chart(
-            curve_df, available_models[0], user_flow, user_head, flow_unit, head_unit, lang
+        fig = create_pump_curve_chart_fixed(
+            curve_data, available_models[0], user_flow, user_head, flow_unit, head_unit, lang
         )
         if fig:
             charts.append(
@@ -1965,10 +2151,14 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
                     dcc.Graph(figure=fig, style={'height': '500px'})
                 ])
             )
+            print("✅ Single curve chart created successfully")
+        else:
+            print("❌ Failed to create single curve chart")
     else:
+        print(f"📊 Creating comparison chart for: {available_models}")
         # Multiple pump comparison
-        fig_comp = create_comparison_chart(
-            curve_df, available_models, user_flow, user_head, flow_unit, head_unit, lang
+        fig_comp = create_comparison_chart_fixed(
+            curve_data, available_models, user_flow, user_head, flow_unit, head_unit, lang
         )
         if fig_comp:
             charts.append(
@@ -1980,12 +2170,14 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
                     dcc.Graph(figure=fig_comp, style={'height': '500px'})
                 ])
             )
+            print("✅ Comparison chart created successfully")
             
             # Individual curves in expandable section
             individual_charts = []
             for model in available_models:
-                fig = create_pump_curve_chart(
-                    curve_df, model, user_flow, user_head, flow_unit, head_unit, lang
+                print(f"📈 Creating individual chart for: {model}")
+                fig = create_pump_curve_chart_fixed(
+                    curve_data, model, user_flow, user_head, flow_unit, head_unit, lang
                 )
                 if fig:
                     individual_charts.append(
@@ -1995,6 +2187,9 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
                             dcc.Graph(figure=fig, style={'height': '400px'})
                         ])
                     )
+                    print(f"✅ Individual chart created for {model}")
+                else:
+                    print(f"❌ Failed to create individual chart for {model}")
             
             if individual_charts:
                 charts.append(
@@ -2005,15 +2200,25 @@ def update_pump_curves(selected_models, curve_data, operating_point, flow_unit, 
                         html.Div(individual_charts)
                     ])
                 )
+        else:
+            print("❌ Failed to create comparison chart")
+    
+    if not charts:
+        print("❌ No charts were created")
+        return html.Div(className='warning-badge', children=[
+            html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+            "Unable to generate pump curves"
+        ]), html.Div()
     
     info_text = html.Div(className='success-badge', children=[
         html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
         get_text("Selected Pumps", lang, count=len(available_models))
     ])
     
+    print(f"✅ Successfully created {len(charts)} chart(s)")
     return info_text, html.Div(charts)
 
-# --- Enhanced Update for All Column Checkboxes ---
+# Update all column checkboxes
 @app.callback(
     [Output({'type': 'column-checkbox', 'index': ALL}, 'value')],
     [Input('select-all-btn', 'n_clicks'),
@@ -2039,7 +2244,7 @@ def update_all_checkboxes(select_all_clicks, deselect_all_clicks, pumps_data):
     
     return [[] for _ in optional_columns]
 
-# --- Additional Translation Updates for Radio Items ---
+# Translation Updates for Radio Items
 @app.callback(
     [Output('flow-unit-radio', 'options'),
      Output('head-unit-radio', 'options')],
@@ -2062,7 +2267,7 @@ def update_radio_options(lang):
     
     return flow_unit_options, head_unit_options
 
-# --- Enhanced Error Handling for Data Loading ---
+# Enhanced Error Handling for Data Loading
 @app.callback(
     Output('main-content-output', 'children', allow_duplicate=True),
     [Input('pumps-data-store', 'data')],
